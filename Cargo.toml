@@ -2,7 +2,7 @@
 name = "nevy"
 version = "0.0.1"
 edition = "2021"
-categories = ["network-programming", "game-development", "data-driven"]
+categories = ["network-programming", "game-development"]
 description = "Simple, expressive networking for your bevy games"
 keywords = ["netcode", "networking", "bevy"]
 license = "MIT OR Apache-2.0"

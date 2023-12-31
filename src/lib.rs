@@ -1,13 +1,12 @@
 use std::marker::PhantomData;
-
-use bevy::prelude::*;
+use bevy::{prelude::*, utils::HashSet};
 
 ///Contains the latest state received from the server.\
-///May be out of date depending on reliability strategy selected in the corresponding [Net] component.
+///May be out of date depending on reliability strategy selected in the corresponding [NetPolicy] component.
 pub struct ServerState<T>(T);
 
 ///Holds the differential state to reduce bandwidth usage.
-///If the corresponding [Net] component allows, duplicate state will be held and compared when changes are detected.
+///If the corresponding [NetPolicy] component allows, duplicate state will be held and compared when changes are detected.
 pub struct NetDiff<T>(T);
 
 
@@ -36,31 +35,82 @@ pub struct SyncStrategy {
     pub diff: bool
 }
 
+#[derive(PartialEq, Eq, Hash)]
 pub struct ClientId(u32);
 
-pub enum SyncPeers {
+/// The default [PeerPolicy].
+/// Allows peers to be whitelisted or blacklisted.
+pub enum PeerList {
     /// All peers will receive component updates.
     All,
-    AllExcept(Vec<ClientId>),
+    AllExcept(HashSet<ClientId>),
     /// Only these specific clients will receive updates about this component.
-    Specific(Vec<ClientId>),
+    Specific(HashSet<ClientId>),
     /// This component will not be synchronized.
     None,
 }
 
+pub struct AllPeers;
+pub struct PeersExcept(HashSet<ClientId>);
+pub struct SpecificPeers(HashSet<ClientId>);
+pub struct NoPeers;
 
-/// A component identifying components that shall be networked.
+impl PeerPolicy for AllPeers {
+    fn should_receive(&self, _client_id: ClientId) -> bool {
+        true
+    }
+}
+
+impl PeerPolicy for PeersExcept {
+    fn should_receive(&self, client_id: ClientId) -> bool {
+        !self.0.contains(&client_id)
+    }
+}
+
+impl PeerPolicy for SpecificPeers {
+    fn should_receive(&self, client_id: ClientId) -> bool {
+        self.0.contains(&client_id)
+    }
+}
+
+impl PeerPolicy for NoPeers {
+    fn should_receive(&self, _client_id: ClientId) -> bool {
+        false
+    }
+}
+
+
+/// A trait to be implemented by any type that wishes to make determinations about which peers should receive a given component update.
+pub trait PeerPolicy {
+    fn should_receive(&self, client_id: ClientId) -> bool;
+}
+
+
+/// A component marking which components on an entity should be networked, and how.
 /// This component contains a [SyncStrategy] which determines how this component will be synchronized.
+/// This component also contains a [PeerPolicy] which determines which peers will receive updates about this component.
+/// The peer policy defaults to [AllPeers] if not specified.
 #[derive(Component)]
-pub struct Net<T: Component> {
+pub struct NetSyncPolicy<T: Component, P: PeerPolicy = AllPeers> {
     ///The strategy used to synchronize this particular component.
     pub strategy: SyncStrategy,
 
-    pub peers: Vec<Entity>,
+    /// Which peers should receive updates about this particular component.
+    /// Primarily useful with your own logic that dynamically changes the peers according to relevance.
+    pub peer_policy: P,
 
     ///The component to be synchronized.
     phantom: PhantomData<T>,
 }
+
+pub struct NetMessagePolicy {
+
+}
+
+pub trait NetMessage {
+
+}
+
 
 
 /// A trait to be implemented on any bundles which will be sent over the network.
