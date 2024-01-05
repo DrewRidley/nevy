@@ -1,4 +1,6 @@
-use bevy::{ecs::system::Commands, app::App};
+use bevy::{ecs::{system::{Commands, Query}, entity::Entity, component::Component}, app::App, transform::components::Transform};
+
+use crate::archetype::{NetComponent, self};
 
 /// A trait Nevy uses internally to extend the bevy Commands API.
 pub trait ClientCommandsExt {
@@ -14,7 +16,19 @@ pub trait ClientCommandsExt {
 
 /// A trait Nevy uses internally to extend the bevy App API.
 pub trait ClientAppExt {
-    fn register_server_netbundle();
-    fn register_client_netbundle();
+    /// Registers the associated type to be automatically networked.
+    /// Upon registering, any T with an adjacent [NetSync<T>] component will be synced according to its policy.
+    fn register_net_type<T: NetComponent>(&mut self) -> &mut Self;
 }
 
+impl ClientAppExt for App {
+    fn register_net_type<T: NetComponent>(&mut self) -> &mut Self {
+        //Register the archetype cache maintenance systems.
+        archetype::register_net_component::<T>(self);
+        self
+    }
+}
+
+
+//#[derive(Component)]
+struct Blah;
