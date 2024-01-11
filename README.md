@@ -2,44 +2,7 @@
 
 ## Introduction 📢
 
-**Nevy** is an advanced networking framework designed for the Bevy game engine. It combines Bevy's simplicity with robust networking capabilities, making it an ideal choice for developers building interconnected gaming experiences.
+Due to the extremely complex nature of networking in games, and the vast number of use cases Nevy wants to accomodate, development is currently ongoing and Nevy is not useable. The repo has been published so feedback can be provided and different APIs can be experimented and prototyped with in an iterative fashion.
 
-## Key Features 🌟
-
-### Bundle-Based Architecture 📦
-
-- **Elegant Grouping** 🧩: Utilizes `NetBundle` to encapsulate networked entities, providing a clean and organized approach to manage game states and behaviors.
-
-### Flexible Synchronization ⚙️
-
-- **Controlled Sync** 🔄: Offers precise control over the synchronization of each entity's state, ensuring efficient and consistent multiplayer experiences.
-
-### Custom Entity Messages 💌
-
-- **Tailored Communication** 💬: Supports custom entity messages, enabling a flexible framework for specific network communication needs.
-
-### Optimized Performance 🚀
-
-- **Efficient Updates** ⏩: Nevy enhances performance by batching updates per archetype, significantly reducing overhead and improving overall game responsiveness.
-
-## Getting Started 🚀
-
-Here's a simple example to get you started with Nevy:
-
-```rust
-#[derive(NetBundle)]
-#[init(init_player)]
-pub struct PlayerBundle {
-    #[sync(always)]
-    name: Name,
-    #[server]
-    role: Role
-}
-
-fn test(mut cmds: Commands) {
-    cmds.spawn_networked::<PlayerBundle>(ServerPlayerBundle {
-        name: Name::new("Blah"),
-        role: Role::User
-    });
-}
-```
+If you are a game developer please check back in a few weeks and hopefully this project will be more applicable to you.
+If you are a engine or networking developer and wish to contribute or have feedback, feel free to reach out in the bevy discord or my DMs (DrewDaPilot).
