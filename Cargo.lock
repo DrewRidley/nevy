@@ -340,31 +340,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy-trait-query"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03c0e3cf09569de8478a06f958a0df02cb12ecbda4d77059d8e4dc3e5a072126"
-dependencies = [
- "bevy-trait-query-impl",
- "bevy_app",
- "bevy_core",
- "bevy_ecs",
- "tracing",
-]
-
-[[package]]
-name = "bevy-trait-query-impl"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a9d5d3e9b4854feb8b622ceaa36e84cb4a14e30ef8b12231db681a04f545748"
-dependencies = [
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.46",
-]
-
-[[package]]
 name = "bevy_a11y"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1508,17 +1483,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e962a19be5cfc3f3bf6dd8f61eb50107f356ad6270fbb3ed41476571db78be5"
 
 [[package]]
-name = "derive-syn-parse"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e79116f119dd1dba1abf1f3405f03b9b0e79a27a3883864bfebded8a3dc768cd"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "dipa"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2261,28 +2225,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "macro_state"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "772f7662b84d85d514fb3a72417bc7067f9eabbe80d56a9c2ff326b7d6ad0ae4"
-dependencies = [
- "lazy_static",
- "macro_state_macros",
-]
-
-[[package]]
-name = "macro_state_macros"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28a71d3b95d81cac5bac4100d2b9d70798e3ad274798afade206f49b0801bc93"
-dependencies = [
- "derive-syn-parse",
- "lazy_static",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2424,24 +2366,9 @@ name = "nevy"
 version = "0.0.1"
 dependencies = [
  "bevy",
- "bevy-trait-query",
  "bincode",
  "dipa",
- "macro_state",
- "nevy_macros",
  "serde",
- "smallvec",
- "staticvec",
-]
-
-[[package]]
-name = "nevy_macros"
-version = "0.1.0"
-dependencies = [
- "macro_state",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -3103,12 +3030,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "staticvec"
-version = "0.11.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6183943e8c03d78596895561edba95bfc9f1e4547a46f720439d714c4c3d08b"
 
 [[package]]
 name = "svg_fmt"
