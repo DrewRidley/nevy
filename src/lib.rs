@@ -112,8 +112,6 @@ fn net_archetype_updates<'a>(
 
     //Associate each bevy [Archetype] with each local [NetArchetype].
 
-        for (metadata, archetype) in serialize_archetype.archetypes.iter().sort
-
     for (metadata, archetype) in serialize_archetype.archetypes.iter().zip(world.archetypes().iter()).filter(|(a, b)| a.id == b.id()) {
         for entity_ref in archetype.entities().iter().map(|ae| world.entity(ae.entity())) {
             let buf = &mut buffer;
