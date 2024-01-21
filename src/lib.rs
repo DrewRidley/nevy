@@ -8,7 +8,7 @@
 //!
 //! Here is an example to illustrate how easy it is to get started writing a multiplayer game:
 //!
-//! Server:
+//! ### Server:
 //! ```
 //! use bevy::prelude::*;
 //! use nevy::prelude::*;
@@ -38,7 +38,7 @@
 //! }
 //!
 //! ```
-use std::{marker::PhantomData, any::TypeId, hash::Hash};
+use std::{marker::PhantomData, any::TypeId, hash::Hash, io::Write};
 use bevy::{prelude::*, ecs::{archetype::ArchetypeId, component::{ComponentId, self}, system::SystemChangeTick}, utils::{HashMap, HashSet, EntityHash}, ptr::Ptr};
 use bincode::DefaultOptions;
 use indexmap::IndexMap;
@@ -47,15 +47,12 @@ use smallvec::SmallVec;
 mod serialize;
 
 /// A marker trait indicating that a given type can be used as a client identifier.
-/// This will be auto-implemented on all types that implement [Hash].
-pub trait ClientId {
-
-}
+/// This will be auto-implemented on all types that implement [Hash], [Send] and [Sync].
+/// [Send] and [Sync] are required because the underlying network buffer is potentially shared between threads.
+pub trait ClientId: Hash + Eq + Send + Sync { }
 
 //Implement ClientId for all hashable types.
-impl<T: Hash> ClientId for T {
-
-}
+impl<T: Hash + Eq + Send + Sync> ClientId for T { }
 
 /// A policy dictating which clients shall receive a particular piece of state.
 /// 
@@ -89,14 +86,27 @@ pub enum ClientPolicy<I:  Hash> {
 /// which client should receive a particular piece of state.
 #[derive(Component)]
 #[component(storage = "SparseSet")]
-pub struct Owner<I: ClientId>(I);
+pub struct Owner<I: ClientId>(pub I);
+
+/// A marker trait to indicate that a particular client is Authoritative over the state of this entity.
+///
+/// A client will dispatch state updates to other clients if it is 'self-authoritative'.
+/// Clients will reject state updates from non-authoritative clients (if a p2p transport layer is used).
+/// This marker is not used if there is a single authoritative server.
+/// A custom consensus mechanism may be required, depending on the game requirements.
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+pub struct Authoritative<I: ClientId>(pub I);
 
 /// Contains a list of each unique pair of (ClientId, Component) on this entity.
 /// 
 /// This is used to build unique component permutations for each Client's specific message requirements.
-/// It performs a niche optimization by grouping similar component policies to reduce message fragmentation.
+/// It optimizes by grouping similar component policies to reduce message fragmentation.
 /// Thus, it is recommended where possible to have as few unique policies as your game logic permits.
+#[derive(Component)]
+#[component(storage = "SparseSet")]
 struct EntityPolicyCache<I: Hash> {
+    //Contains a list of policies and their corresponding components.
     entries: IndexMap<ClientPolicy<I>, SmallVec<[ComponentId; 6]>>
 }
 
@@ -122,7 +132,7 @@ impl<I: Default + Hash> Default for ClientPolicy<I> {
 /// `T`: The type of the component being networked.
 #[derive(Component)]
 #[component(storage = "SparseSet")]
-pub struct NetComp<I: Hash, T>(ClientPolicy<I>, PhantomData<T>);
+pub struct NetComp<I: Hash, T>(pub ClientPolicy<I>, PhantomData<T>);
 
 /// A marker to indicate that a given component is networked for this entity.
 /// This marker can be removed or inserted at runtime.
@@ -135,11 +145,11 @@ pub struct NetComp<I: Hash, T>(ClientPolicy<I>, PhantomData<T>);
 /// 'I': The type of the identifier.
 #[derive(Component)]
 #[component(storage = "SparseSet")]
-pub struct DynNetComp<I: Hash, T>(ClientPolicy<I>, PhantomData<T>);
+pub struct DynNetComp<I: Hash, T>(pub ClientPolicy<I>, PhantomData<T>);
 
 /// A marker to indicate that the entity is networked.
 /// This will likely rarely be used but exists if you need your logic to be aware of the networked status of an entity.
-/// This is shorthand for checking each of the many components for an adjacent [NetComp]/[DynNetComp]
+/// This is shorthand for checking each of the many components for an adjacent [NetComp]/[DynNetComp].
 /// Due to its sparse nature, its only recommended to use if you require absolute proof of networked state.
 #[derive(Component)]
 #[component(storage = "SparseSet")]
@@ -233,7 +243,96 @@ struct NetArchetypes<S: Serializer> {
     archetypes: Vec<NetArchetype<S>>
 }
 
+impl<S: Serializer> IntoIterator for NetArchetypes<S> {
+    type Item = NetArchetype<S>;
+    type IntoIter = std::vec::IntoIter<NetArchetype<S>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.archetypes.into_iter()
+    }
+}
+
+/// A collection of client IDs and their associated network buffers.
+/// Write to the underlying map to send data to clients.
+#[derive(Resource, Default)]
+struct NetBuffer<I: ClientId> {
+    map: IndexMap<I, Vec<u8>>
+}
+
+impl<I: ClientId> NetBuffer<I> {
+    /// Creates a new NetBuffer. Typically, this will be stored as a resource in the main game world.
+    pub fn new() -> Self {
+        NetBuffer {
+            map: IndexMap::new()
+        }
+    }
+
+    /// Write a slice to a particular client.
+    pub fn write_to_client(&mut self, client: I, data: &[u8]) {
+        self.map.entry(client).and_modify(|buf| {
+            buf.extend_from_slice(data);
+        });
+    }
+
+    /// Given a policy, this returns a slice containing the buffers of all relevant clients.
+    pub fn relevant_buffers<'a>(&'a mut self, pol: ClientPolicy<I>, own: Option<I>) -> Vec<&mut Vec<u8>> {
+        match pol {
+            ClientPolicy::All => {
+                self.map.values_mut().collect::<Vec<_>>()
+            },
+            ClientPolicy::Exclude(exclude) => {
+                self.map.iter_mut().filter(|(k, v)| {
+                    !exclude.contains(k)
+                }).map(|(_, v)| v).collect::<Vec<_>>()
+            },
+            ClientPolicy::Include(include) => {
+                self.map.iter_mut().filter(|(k, _)| {
+                    include.contains(k)
+                }).map(|(_, v)| v).collect::<Vec<_>>()
+            },
+            ClientPolicy::One(one) => {
+                vec![self.map.get_mut(&one).unwrap()]
+            },
+            ClientPolicy::Owner => {
+                if let Some(own) = own {
+                    vec![self.map.get_mut(&own).unwrap()]
+                } else {
+                    warn!("A client policy matched against an owner but no owner was specified!");
+                    vec![]
+                }
+            },
+            ClientPolicy::None => {
+                vec![]
+            }
+        }
+    }
+}
+
 type BincodeSerializer<'a, 'b> = &'a mut bincode::Serializer<&'b mut std::io::Cursor<Vec<u8>>, DefaultOptions>;
+
+fn net_archetype_updates<S: Serializer, I: ClientId>(
+    serializer_cache: Res<'static, NetArchetypes<S>>,
+    world: &World,
+    outbound_buf: ResMut<'static, NetBuffer<I>>
+) {
+    let change_tick = world.read_change_tick();
+
+    let mut buffer : std::io::Cursor<Vec<u8>> = std::io::Cursor::new(Vec::new());
+
+
+    // Aligned iterator over all archetypes and their corresponding cache entry.
+    for (cache, world_archetype) in serializer_cache.archetypes.iter().map(|ae| (ae, world.archetypes().get(ae.id).unwrap())) { 
+        //For each entity in this archetype, we need to check for changes and serialize them accordingly.
+        for ent_ref in world_archetype.entities().iter().map(|ae| world.entity(ae.entity())) {
+            serialize_entity(ent_ref, &mut buffer);
+        }
+    }
+}
+
+/// Discovers changes on a given entity and serializes a complete changeset message to the underlying buffer.
+#[inline]
+fn serialize_entity(ent: EntityRef, buf: &mut impl Write) {
+
+}
 
 /* 
 fn net_archetype_updates<'a>(
