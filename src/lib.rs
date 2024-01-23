@@ -39,11 +39,10 @@
 //!
 //! ```
 use bevy::prelude::*;
-use crate::policy::ClientId;
+use std::hash::Hash;
 
-mod serialize;
-mod policy;
-mod stream;
+pub mod policy;
+pub mod stream;
 
 
 /// A marker trait to indicate which client 'owns' this entity.
@@ -78,79 +77,11 @@ pub struct Authoritative<I: ClientId>(pub I);
 #[component(storage = "SparseSet")]
 pub struct NetEntity;
 
-/* 
-fn net_archetype_updates<'a>(
-   // serialize_archetype: Res<T>, 
-    world: &World, 
-    sys_changeticks: SystemChangeTick) {
-    //Intersect our archetypes with the world ones.
-    //We need to query the world ones for all their entities.
-    let mut buffer : std::io::Cursor<Vec<u8>> = std::io::Cursor::new(Vec::new());
 
-    //Associate each bevy [Archetype] with each local [NetArchetype].
+/// A marker trait indicating that a given type can be used as a client identifier.
+/// This will be auto-implemented on all types that implement [Hash], [Send] and [Sync].
+/// [Send] and [Sync] are required because the underlying network buffer is potentially shared between threads.
+pub trait ClientId: Hash + Eq + Send + Sync { }
 
-    for (metadata, archetype) in serialize_archetype.archetypes.iter().map(|ae| (ae, world.archetypes().get(ae.id).unwrap())) {
-        for entity_ref in archetype.entities().iter().map(|ae| world.entity(ae.entity())) {
-            let buf = &mut buffer;
-            let start = buf.position();
-            //The bitmask is start -> start + ((metadata.components.len() + 7) / 8)
-            buf.set_position((start as u64) + ((metadata.components.len() + 7) / 8) as u64);
-            
-            //buffer.set_position(buffer.position() + ((metadata.components.len() + 7) / 8) as u64);
-
-            let mut serializer = bincode::Serializer::new(buf, DefaultOptions::new());
-            
-            //Move the buffer to accomodate the bitmask.
-            //buffer.set_position(((metadata.components.len() + 7) / 8) as u64);
-
-            for (idx, (comp_id, comp_count, ser)) in metadata.components.iter().enumerate() {
-                let change_ticks = entity_ref.get_change_ticks_by_id(*comp_id).unwrap();
-              
-                //This component has changed, lets deref and serialize it.
-                if change_ticks.is_changed(sys_changeticks.last_run(), sys_changeticks.this_run()) {
-                    ser(entity_ref, &mut serializer);
-                }
-            }
-        }
-    }
-
-    // for (metadata, archetype) in serialize_archetype.archetypes.iter().zip(world.archetypes().iter()).filter(|(a, b)| a.id == b.id()) {
-    //     for entity_ref in archetype.entities().iter().map(|ae| world.entity(ae.entity())) {
-    //         let buf = &mut buffer;
-    //         let start = buf.position();
-    //         //The bitmask is start -> start + ((metadata.components.len() + 7) / 8)
-    //         buf.set_position((start as u64) + ((metadata.components.len() + 7) / 8) as u64);
-            
-    //         //buffer.set_position(buffer.position() + ((metadata.components.len() + 7) / 8) as u64);
-
-    //         let mut serializer = bincode::Serializer::new(buf, DefaultOptions::new());
-            
-    //         //Move the buffer to accomodate the bitmask.
-    //         //buffer.set_position(((metadata.components.len() + 7) / 8) as u64);
-
-    //         for (idx, (comp_id, comp_count, ser)) in metadata.components.iter().enumerate() {
-    //             let change_ticks = entity_ref.get_change_ticks_by_id(*comp_id).unwrap();
-              
-    //             //This component has changed, lets deref and serialize it.
-    //             if change_ticks.is_changed(sys_changeticks.last_run(), sys_changeticks.this_run()) {
-    //                 let ptr = entity_ref.get_by_id(*comp_id).unwrap();
-
-    //                 //Lets update the bitmask for this particular bit.
-    //                 let bit = idx % 8;
-    //                 let byte = idx / 8;
-    //                 let bitmask = 1 << bit;
-    //                 let mut byte = buf.get_mut()[(start + byte) as usize];
-    //                 byte |= bitmask;
-
-    //                 // Safety:
-    //                 // The serializer was associated with this ComponentId when the archetype was registered.
-    //                 // This particular entity is a member of this archetype so it must still contain this component.
-    //                 // As long as this 'ser' is associated with ComponentID, the usage will be correct.
-    //                 ser(entity_ref, &mut serializer);
-    //             }
-    //         }
-    //     }
-    // }
-}
-
-*/
+//Implement ClientId for all hashable types.
+impl<T: Hash + Eq + Send + Sync> ClientId for T { }
