@@ -8,32 +8,12 @@
 //! For more complex use cases, investigate building your own systems using the [NetStreamBuilder].
 //! This builder will facilitate the construction of custom streaming protocols and behavior.
 use std::marker::PhantomData;
-use bevy::{ecs::schedule::ScheduleLabel, prelude::*};
-use crate::ClientId;
-
-#[cfg(feature = "rkyv")]
-use rkyv::{Archive, Serialize, Deserialize};
-
-
-#[cfg(feature = "serde")]
-fn register_component_serializer<C: Component + serde::Serialize>() {
-
-} 
-
-#[cfg(feature = "rkyv")]
-fn register_component_serializer<C: Component + rkyv::Serialize>() {
-
-}
-
-
-/// A plugin containing all of the neccessary systems to synchronize networked state.
-/// This plugin will monitor and dispatch appropiate component changes to the connected peers.
-pub struct NetStreamPlugin {}
-impl Plugin for NetStreamPlugin {
-    fn build(&self, app: &mut App) {
-       
-    }
-}
+use bevy::{ecs::{archetype::{Archetype, ArchetypeId}, component::ComponentId}, prelude::*, utils::HashMap};
+use indexmap::IndexMap;
+use num_traits::Num;
+use rkyv::Deserialize;
+use smallvec::SmallVec;
+use crate::{policy::EntityRingPolicy, ClientId};
 
 /// This type is incomplete, but will eventually be used to facilitate the development of custom
 /// streaming protocols.
@@ -87,3 +67,47 @@ pub struct NetComponent<
 #[derive(Component)]
 #[component(storage = "SparseSet")]
 pub struct NetEntity;
+
+/// A cache that contains a list of archetypes that need to be visited by the network dispatcher.
+/// 
+/// A networked archetype is an archetype with one or more [NetComponent].
+#[derive(Resource)]
+pub struct NetArchetypes {
+    entries: SmallVec<[ArchetypeId; 16]>
+}
+
+
+/// Receives a valid archetype, and writes relevant changes to the underlying buffer.
+/// This assumes the archetype has already been confirmed to align to the policy requirements.
+fn buffer_archetype_changes(
+    world: &World,
+    archetype: &Archetype,
+) {
+    for ent in archetype.entities().iter() {
+        
+    }
+}
+
+/// Streams all networked archetypes that contain policy 'P'.
+/// 
+/// Assumes that this system has already been filtered by the run criteria imposed by 'P'.
+pub fn net_stream_sys<N: 'static + Num + Send + Sync, P: 'static + Send + Sync>(
+    world: &World,
+    net_archetypes: Res<NetArchetypes>,
+) {
+    for relevant_archetype in net_archetypes.entries.iter() {
+        match world.archetypes().get(*relevant_archetype) {
+            Some(ecs_archetype) => { 
+                //The archetypes must be filtered to only include ones with the matching policy.
+                //Non-policy driven entities must be handled by a separate system.
+                let policy = world.component_id::<EntityRingPolicy<N, P>>();
+                if let Some(_) = policy {
+                    buffer_archetype_changes(world, ecs_archetype);
+                }
+            }
+            None => {
+                panic!("Archetype {:?} was included in the list of streamed archetypes, but does not exist!.", relevant_archetype);
+            }
+        }
+    }
+}

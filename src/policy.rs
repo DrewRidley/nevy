@@ -198,5 +198,7 @@ pub struct EntityRingPolicy<N: Num, P> {
 /// 
 /// This is used by the update dispatcher to efficiently determine policy overlap without checking each component.
 /// For each unique policy, updates are constructed in a manner that respects the entity-wide [EntityRingPolicy].
+/// Components with no policy associated will all be included in a set with 'None' as the policy type.
 #[derive(Component)]
-struct EntityPolicyCache<I: ClientId>(SmallVec<[(PolicyType<I>, [ComponentId; 16]); 3]>);
+pub(crate) struct EntityPolicyCache<I: ClientId>(SmallVec<[(Option<PolicyType<I>>, SmallVec<[ComponentId; 6]>); 3]>);
+
