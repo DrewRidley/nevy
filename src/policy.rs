@@ -9,7 +9,7 @@
 //! while the latter is used to establish rings of influence around a particular entity,
 //! and the maximum update rate for each ring.
 use std::{marker::PhantomData, time::Duration};
-use bevy::ecs::component::Component;
+use bevy::ecs::component::{Component, ComponentId};
 use num_traits::Num;
 use smallvec::SmallVec;
 use crate::ClientId;
@@ -18,8 +18,9 @@ use crate::ClientId;
 
 /// The clients selected by this particular policy.
 /// 
-/// Use this to change over time which entities are included in the policy.
-#[derive(PartialEq, Eq)]
+/// Use this to dynamically change which client's receive a given components state.
+/// If a client is removed from all component policies, the client will implicilty receive a cleanup message to remove it locally.
+#[derive(PartialEq, Eq, Hash)]
 pub enum PolicyType<I: ClientId> {
     All,
     Exclude(SmallVec<[I; 32]>),
@@ -29,6 +30,8 @@ pub enum PolicyType<I: ClientId> {
 }
 
 impl<I: ClientId> PolicyType<I> {
+    /// Checks whether a given client is included in this policy.
+    /// Has a O(n) complexity, so use sparingly.
     pub fn is_included(&self, id: &I) -> bool {
         match self {
             PolicyType::All => true,
@@ -39,6 +42,8 @@ impl<I: ClientId> PolicyType<I> {
         }
     }
 
+    /// Checks whether a given client is excluded from this policy.
+    /// Has a O(n) complexity, so use sparingly.
     pub fn is_excluded(&self, id: &I) -> bool {
         match self {
             PolicyType::All => false,
@@ -49,14 +54,19 @@ impl<I: ClientId> PolicyType<I> {
         }
     }
 
+    /// Change the policy so it includes all clients.
     pub fn include_all(&mut self) {
         *self = PolicyType::All;
     }
 
+    /// Change the policy so it excludes all clients.
     pub fn exclude_all(&mut self) {
         *self = PolicyType::None;
     }
 
+    /// Add the specified client to the list of included clients.
+    /// 
+    /// This may change the policy type if it is 'Owner' or 'None'
     pub fn include(&mut self, id: I) {
         match self {
             PolicyType::All => {},
@@ -70,11 +80,18 @@ impl<I: ClientId> PolicyType<I> {
                     include.push(id);
                 }
             },
-            PolicyType::Owner => {},
-            PolicyType::None => {}
+            PolicyType::Owner => {
+                *self = PolicyType::Include(vec![id]);
+            },
+            PolicyType::None => {
+                *self = PolicyType::Include(vec![id]);
+            }
         }
     }
 
+    /// Add the specified client to the list of excluded clients.
+    /// 
+    /// This will change the policy type from 'Owner' or 'None' to 'Exclude'.
     pub fn exclude(&mut self, id: I) {
         match self {
             PolicyType::All => {},
@@ -88,11 +105,14 @@ impl<I: ClientId> PolicyType<I> {
                     include.remove(index);
                 }
             },
-            PolicyType::Owner => {},
+            PolicyType::Owner => {
+                *self = PolicyType::Exclude(SmallVec::from_elem(id, 1));
+            },
             PolicyType::None => {}
         }
     }
 
+    /// Toggles the inclusion of the specified client.
     pub fn toggle(&mut self, id: I) {
         match self {
             PolicyType::All => {},
@@ -173,3 +193,10 @@ pub struct EntityRingPolicy<N: Num, P> {
     /// This allows you to have multiple rings on a single entity.
     pol: PhantomData<P>
 }
+
+/// A cache containing all of the unique policies in a given entity.
+/// 
+/// This is used by the update dispatcher to efficiently determine policy overlap without checking each component.
+/// For each unique policy, updates are constructed in a manner that respects the entity-wide [EntityRingPolicy].
+#[derive(Component)]
+struct EntityPolicyCache<I: ClientId>(SmallVec<[(PolicyType<I>, [ComponentId; 16]); 3]>);
