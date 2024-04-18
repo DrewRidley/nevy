@@ -41,9 +41,13 @@
 use bevy::prelude::*;
 use std::hash::Hash;
 
-pub mod policy;
-pub mod stream;
+pub mod client;
+pub mod muxer;
+pub mod server;
+
 pub mod messages;
+pub mod rpc;
+mod encoder;
 
 
 /// A marker trait indicating that a given type can be used as a client identifier.
@@ -53,3 +57,9 @@ pub trait ClientId: Hash + Eq + Send + Sync + Clone { }
 
 //Implement ClientId for all hashable types.
 impl<T: Hash + Eq + Send + Sync + Clone> ClientId for T { }
+
+
+/// A marker component indicating that the adjacent type 'T' shall be networked on this specific entity.
+#[derive(Component)]
+pub struct Net<T: Component>(T);
+
