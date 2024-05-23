@@ -39,21 +39,6 @@
 //!
 //! ```
 
-use unique_type_id::UniqueTypeId;
 
-pub mod client;
-pub mod server;
-mod streaming;
-mod messages;
-
-/// A trait implemented on all networked types.
-/// Describes that a particular piece of state is to be networked.
-pub trait NetComponent: serde::Serialize + serde::de::DeserializeOwned + unique_type_id::UniqueTypeId<u16> + Send + Sync + 'static { }
-
-pub trait NetMessage: UniqueTypeId<u16> + serde::Serialize + serde::de::DeserializeOwned + 'static {}
-
-/// A component whose state is streamed over the network.
-/// Any entity with one or more 'Net<T>' will be automatically replicated to peers.
-#[derive(bevy::ecs::component::Component)]
-pub struct Net<T: NetComponent>(T);
-
+mod streams;
+mod endpoint;
