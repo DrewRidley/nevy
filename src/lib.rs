@@ -39,6 +39,3 @@
 //!
 //! ```
 
-
-mod streams;
-mod endpoint;

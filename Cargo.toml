@@ -2,7 +2,7 @@
 
 [package]
 name = "nevy"
-version = "0.0.1"
+version = "0.0.1-dev"
 edition = "2021"
 categories = ["network-programming", "game-development"]
 description = "Simple, expressive networking for your bevy games"
@@ -11,11 +11,15 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/DrewRidley/nevy"
 documentation = "https://docs.rs/nevy"
+#rust-version = "1.77"
 
 [dependencies]
-bevy = "0.13"
+bevy.workspace = true
+smallvec = "1.13.2"
+url = "2.5.0"
 
-web-transport = { git = "https://github.com/kixelated/web-transport-rs.git" }
-quinn = { version = "*", features = ["ring"] }
-rustls-platform-verifier = "0.3.1"
-rustls = "0.23.7"
+[workspace]
+members = ["crates/*"]
+
+[workspace.dependencies]
+bevy = { version = "0.13", default-features = false }
