@@ -23,3 +23,5 @@ members = ["crates/*"]
 
 [workspace.dependencies]
 bevy = { version = "0.13", default-features = false }
+
+# profile.dev.opt-level = "3"

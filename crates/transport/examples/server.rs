@@ -1,9 +1,10 @@
 use std::{io::Read, sync::Arc, time::Duration};
 
-use bevy::{app::{App, Startup, Update}, ecs::system::{Commands, Query}, log::{debug, trace, Level, LogPlugin}, MinimalPlugins};
-use quinn_proto::VarInt;
-use rustls::server;
+use bevy::log::Level;
+use bevy::log::LogPlugin;
+use bevy::prelude::*;
 use transport::prelude::*;
+use transport::bevy::*;
 
 fn load_certs() -> rustls::ServerConfig {
     let chain = std::fs::File::open("fullchain.pem").expect("failed to open cert file");
@@ -37,7 +38,7 @@ fn load_certs() -> rustls::ServerConfig {
 
 
 
-fn create_endpoint_sys(mut cmds: Commands) {
+fn create_endpoint_sys(mut commands: Commands) {
     let mut config = load_certs();
 
     config.max_early_data_size = u32::MAX;
@@ -53,38 +54,88 @@ fn create_endpoint_sys(mut cmds: Commands) {
 
     server_config.transport = Arc::new(transport_config);
 
-    let endpoint = NativeEndpoint::new("0.0.0.0:443".parse().unwrap(), None, Some(server_config), true).unwrap();
+    let endpoint = EndpointState::new("0.0.0.0:443".parse().unwrap(), None, Some(server_config)).unwrap();
 
-    cmds.spawn(endpoint);
+    commands.spawn((
+        endpoint,
+        BevyEndpoint,
+    ));
 }
 
-fn receive_datagrams_system(mut ep_q: Query<&mut NativeEndpoint>) {
-    for mut ep in ep_q.iter_mut() {
-        for cid in ep.connections() {
-            match ep.recv_datagram(cid) {
-                Ok(res) => {
-                    let Some(bytes) = res else {
-                        continue;
-                    };
+#[derive(Component)]
+struct Stream {
+    endpoint_entity: Entity,
+    connection_id: ConnectionId,
+    stream_id: StreamId,
+    data: Vec<u8>,
+}
 
-                    println!("Received datagram: {}", String::from_utf8(bytes.to_vec()).unwrap());
-                },
-                Err(err) => unreachable!("The connection must exist!"),
+fn spawn_streams(
+    mut commands: Commands,
+    mut new_stream_r: EventReader<NewStream>,
+) {
+    for &NewStream { endpoint_entity, connection_id, stream_id, .. } in new_stream_r.read() {
+        commands.spawn(Stream {
+            endpoint_entity,
+            connection_id,
+            stream_id,
+            data: Vec::new(),
+        });
+    }
+}
+
+fn read_streams(
+    mut stream_q: Query<&mut Stream>,
+    mut endpoint_q: Query<&mut EndpointState>,
+) {
+    for mut stream in stream_q.iter_mut() {
+        let mut endpoint = endpoint_q.get_mut(stream.endpoint_entity).unwrap();
+        let connection = endpoint.get_connection_mut(stream.connection_id).unwrap();
+
+        for data in connection.reader(stream.stream_id).read() {
+            stream.data.extend(data.as_ref());
+        }
+    }
+}
+
+fn finish_streams(
+    mut commands: Commands,
+    mut closed_stream_r: EventReader<ReceiveStreamClosed>,
+    stream_q: Query<(Entity, &Stream)>,
+) {
+    for &ReceiveStreamClosed { endpoint_entity, connection_id, stream_id, .. } in closed_stream_r.read() {
+        for (stream_entity, stream) in stream_q.iter() {
+            if {
+                stream.endpoint_entity == endpoint_entity &&
+                stream.connection_id == connection_id &&
+                stream.stream_id == stream_id
+            } {
+
+                info!("stream finished, message: {:?}", std::str::from_utf8(&stream.data));
+
+                commands.entity(stream_entity).despawn();
+                continue;
             }
         }
     }
 }
 
 
+
 fn main() {
     App::new()
         .add_plugins(MinimalPlugins)
         .add_plugins(LogPlugin {
-            level: Level::TRACE,
+            // level: Level::TRACE,
+            level: Level::DEBUG,
             ..Default::default()
         })
-        .add_plugins(NativeEndpointPlugin)
+        .add_plugins(BevyEndpointPlugin::default())
         .add_systems(Startup, create_endpoint_sys)
-        .add_systems(Update, receive_datagrams_system)
+        .add_systems(Update, (
+            spawn_streams,
+            read_streams,
+            finish_streams,
+        ))
         .run();
 }

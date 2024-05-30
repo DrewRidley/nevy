@@ -1,1 +1,3 @@
 target/
+fullchain.pem
+privkey.pem

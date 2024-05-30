@@ -39,4 +39,4 @@ rustls-platform-verifier = "0.3.1"
 
 [features]
 browser = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys", "bevy_async_task"]
-default = ["browser"]
+# default = ["browser"]

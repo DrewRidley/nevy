@@ -1,11 +1,10 @@
 use std::{io::IoSliceMut, net::{SocketAddr, UdpSocket}, sync::Arc};
-use bevy::{ecs::system::SystemParam, prelude::*, utils::{hashbrown::HashMap, smallvec::SmallVec, HashSet}};
-use bytes::{Buf, Bytes};
-use quinn_proto::{Chunk, ConnectError, ConnectionEvent, ConnectionHandle, DatagramEvent, Endpoint, EndpointConfig, ReadableError, RecvStream, SendDatagramError, SendStream, ServerConfig, StreamId, VarInt, VarIntBoundsExceeded, WriteError};
-use quinn_udp::{RecvMeta, UdpSockRef, UdpSocketState};
-use web_transport_proto::{ConnectRequest, ConnectResponse};
 
-use crate::connection::{ConnectionId, NativeConnection};
+use bevy::{prelude::*, utils::hashbrown::HashMap};
+use quinn_proto::{DatagramEvent, EndpointConfig, ServerConfig};
+use quinn_udp::{RecvMeta, UdpSockRef, UdpSocketState};
+
+use crate::{connection::{ConnectionId, ConnectionState}, EndpointEventHandler};
 
 
 
@@ -14,32 +13,30 @@ use crate::connection::{ConnectionId, NativeConnection};
 /// This endpoint supports any platform which supports instantiation of a [UdpSocket]. For browsers consider [BrowserEndpoint].
 /// If you plan on connecting to a WebTransport server or accepting connections from a WebTransport peer, ensure 'web_transport' is set to true.
 #[derive(Component)]
-pub struct NativeEndpoint {
-    /// The quinn endpoint used to administer the connection.
+pub struct EndpointState {
+    /// The quinn endpoint state.
     pub(crate) endpoint: quinn_proto::Endpoint,
-    /// The state associated with every connection administered by this endpoint.
-    pub(crate) connections: HashMap<ConnectionHandle, NativeConnection>,
-
-    /// The UdpSocket and its associated state.
-    pub(crate) sock: (UdpSocket, UdpSocketState),
-    /// The configurations used by this endpoint
-    pub(crate) cfg: (EndpointConfig, Option<ServerConfig>),
-    /// Whether or not this endpoint should transmit/process additional WebTransport headers.
-    /// Enable if one or more peer is expected to use WebTransport, or if you intend to connect to a WebTransport server.
-    pub(crate) web_transport: bool
+    /// The connection states for this endpoint.
+    pub(crate) connections: HashMap<ConnectionId, ConnectionState>,
+    pub(crate) socket: UdpSocket,
+    pub(crate) socket_state: UdpSocketState,
+    pub(crate) local_addr: SocketAddr,
+    /// The endpoint configuration.
+    pub(crate) config: EndpointConfig,
+    /// the configuration used by this endpoint when accepting connections, if it is configured as a server
+    pub(crate) server_config: Option<ServerConfig>,
 }
 
 
 pub struct ConnectionNotFound;
 
-
-impl NativeEndpoint {
-    pub fn new(bind_addr: SocketAddr, cfg: Option<EndpointConfig>, server_cfg: Option<ServerConfig>, wt: bool) -> std::io::Result<Self> {
-        let cfg = cfg.unwrap_or_default();
+impl EndpointState {
+    pub fn new(bind_addr: SocketAddr, config: Option<EndpointConfig>, server_config: Option<ServerConfig>) -> std::io::Result<Self> {
+        let config = config.unwrap_or_default();
 
         let endpoint =  quinn_proto::Endpoint::new(
-            Arc::new(cfg.clone()),
-            server_cfg.clone().map(Arc::new),
+            Arc::new(config.clone()),
+            server_config.clone().map(Arc::new),
             true,
             None
         );
@@ -50,197 +47,211 @@ impl NativeEndpoint {
         Ok(Self {
             endpoint,
             connections: HashMap::new(),
-            sock: (socket, socket_state),
-            cfg: (cfg, server_cfg),
-            web_transport: wt
+            local_addr: socket.local_addr()?,
+            socket,
+            socket_state,
+            config,
+            server_config,
         })
     }
 
-    pub fn connect(&mut self, client_cfg: quinn_proto::ClientConfig, addr: SocketAddr, server_name: &str) -> Result<(), quinn_proto::ConnectError> {
-        let (handle, conn) = self.endpoint.connect(std::time::Instant::now(), client_cfg, addr, server_name)?;
+    pub fn connect(&mut self, client_cfg: quinn_proto::ClientConfig, addr: SocketAddr, server_name: &str) -> Result<&mut ConnectionState, quinn_proto::ConnectError> {
+        let (handle, connection) = self.endpoint.connect(std::time::Instant::now(), client_cfg, addr, server_name)?;
+        let connection_id = ConnectionId(handle);
 
-        let c = NativeConnection::new(conn, handle);
+        let connection = ConnectionState::new(connection, connection_id);
 
-        if self.connections.insert(handle, c).is_some() {
-            error!("New connection attempt has same handle as existing one");
+        let bevy::utils::hashbrown::hash_map::Entry::Vacant(entry) = self.connections.entry(connection_id) else {
             panic!("Attempted to connect to a peer with same handle as existing one!");
-        }
+        };
 
-        Ok(())
+        Ok(entry.insert(connection))
     }
 
-    /// Attempts to receive data up to 'max_len' from the provided stream.
-    /// Will panic if the connection does not contain the specified stream.
-    /// Returns a [ReadableError] if the data could not be read or there is no more data available.
-    pub fn recv_from_stream(&mut self, conn: ConnectionId, stream: StreamId, max_len: usize) -> Result<Option<Chunk>, ReadableError> {
-        let mut stream = self.connections.get_mut(&conn.0).unwrap().conn.recv_stream(stream);
-        let mut chunks = stream.read(true)?;
-
-        let data = chunks.next(max_len).unwrap();
-        let _ = chunks.finalize();
-        Ok(data)
+    pub fn connections(&self) -> impl Iterator<Item = ConnectionId> + '_ {
+        self.connections.keys().copied()
     }
 
-    /// Attempts to write the specified data to the specified stream.
-    /// Will panic if the connection does not contain the specified stream.
-    /// Will return a [WriteError] if the data could not immediately be written.
-    pub fn write_to_stream(&mut self, conn: ConnectionId, stream: StreamId, data: &[u8]) -> Result<usize, WriteError> {
-        let mut stream = self.connections.get_mut(&conn.0).unwrap().conn.send_stream(stream);
-        stream.write(data)
+    pub fn get_connection(&self, connection_id: ConnectionId) -> Option<&ConnectionState> {
+        self.connections.get(&connection_id)
     }
 
-    /// Send an unreliable datagram to the peer.
-    /// Will yield a [SendDatagramError] if the peer is congested or does not support datagrams.
-    pub fn send_datagram(&mut self, conn: ConnectionId, data: Bytes) -> Result<(), SendDatagramError> {
-        // Use the connection to send the datagram
-        self.connections
-            .get_mut(&conn.0)
-            .ok_or_else(|| SendDatagramError::Disabled)?
-            .conn.datagrams().send(data, false)
+    pub fn get_connection_mut(&mut self, connection_id: ConnectionId) -> Option<&mut ConnectionState> {
+        self.connections.get_mut(&connection_id)
     }
 
-    /// Receive an unreliable datagram from a peer.
-    ///
-    /// Will yield [ConnectionNotFound] if the specified connection does not exist.
-    /// The inner value will be [None] if there are no datagrams to be read.
-    pub fn recv_datagram(&mut self, conn: ConnectionId) -> Result<Option<Bytes>, ConnectionNotFound> {
-        Ok(self.connections
-            .get_mut(&conn.0)
-            .ok_or_else(|| ConnectionNotFound)?
-            .conn.datagrams().recv())
+    /// public facing update method for the endpoint
+    pub fn update(&mut self, buffers: &mut EndpointBuffers, event_handler: &mut impl EndpointEventHandler) {
+        self.process_endpoint_datagrams(buffers, event_handler);
+        self.poll_connections(buffers, event_handler);
     }
 
-    pub fn connections(&self) -> Vec<ConnectionId> {
-        self.connections.keys().map(|k| ConnectionId(*k)).collect()
-    }
-}
 
 
+    /// reads datagrams from the socket and processes them
+    fn process_endpoint_datagrams(&mut self, buffers: &mut EndpointBuffers, event_handler: &mut impl EndpointEventHandler) {
+        let min_buffer_len = self.config.get_max_udp_payload_size().min(64 * 1024) as usize
+            * self.socket_state.max_gso_segments()
+            * quinn_udp::BATCH_SIZE;
 
-fn process_datagram_event(ep: &mut NativeEndpoint, send_buffer: &mut Vec<u8>, event: DatagramEvent) {
-    match event {
-        DatagramEvent::NewConnection(new_conn) => {
-            if ep.cfg.1.is_none() {
-                warn!("Received an incoming connection request despite not being configured for listening on endpoint: {:?}", ep.sock.0.local_addr());
-                return;
-            }
+        buffers.recv_buffer.resize(min_buffer_len, 0);
+        let buffer_len = buffers.recv_buffer.len();
 
-            let mut send_buffer = Vec::new();
+        let mut buffer_chunks = buffers.recv_buffer.chunks_mut(buffer_len / quinn_udp::BATCH_SIZE).map(IoSliceMut::new);
 
-            match ep.endpoint.accept(new_conn, std::time::Instant::now(), &mut send_buffer, None) {
-                Ok((handle, conn)) => {
-                    debug!("Successfully negotiated new connection with peer: {}", conn.remote_address());
-                    if ep.connections.insert(handle, NativeConnection::new(conn, handle)).is_some() {
-                        error!("A new connection was established using a handle that already exists!");
+        //unwrap is safe here because we know we have at least one chunk based on established buffer len.
+        let mut buffer_chunks: [IoSliceMut; quinn_udp::BATCH_SIZE] =  std::array::from_fn(|_| buffer_chunks.next().unwrap());
+
+        let mut metas = [RecvMeta::default(); quinn_udp::BATCH_SIZE];
+
+        loop {
+            match self.socket_state.recv(UdpSockRef::from(&self.socket), &mut buffer_chunks, &mut metas) {
+                Ok(dgram_count) => {
+                    for (meta, buffer) in metas.iter().zip(buffer_chunks.iter()).take(dgram_count) {
+                        let mut remaining_data = &buffer[0..meta.len];
+
+                        while !remaining_data.is_empty() {
+                            let stride_length = meta.stride.min(remaining_data.len());
+                            let data = &remaining_data[0..stride_length];
+                            remaining_data = &remaining_data[stride_length..];
+
+                            let ecn = meta.ecn.map(|ecn| {
+                                match ecn {
+                                    quinn_udp::EcnCodepoint::Ect0 => quinn_proto::EcnCodepoint::Ect0,
+                                    quinn_udp::EcnCodepoint::Ect1 => quinn_proto::EcnCodepoint::Ect1,
+                                    quinn_udp::EcnCodepoint::Ce => quinn_proto::EcnCodepoint::Ce,
+                                }
+                            });
+
+                            let Some(datagram_event) = self.endpoint.handle(
+                                std::time::Instant::now(),
+                                meta.addr,
+                                meta.dst_ip,
+                                ecn,
+                                data.into(),
+                                &mut buffers.send_buffer,
+                            ) else {
+                                continue;
+                            };
+
+                            self.process_datagram_event(&buffers.send_buffer, datagram_event, event_handler);
+                        }
                     }
                 },
-                Err(err) => {
-                    info!("Received a failed connection attempt from peer with reason: {:?}", err.cause);
-                    if let Some(tx) = err.response {
-                        trace!("Sending connection failure reason to peer: {}", tx.destination);
-
-                        let Err(e) = respond(ep, &tx, &send_buffer) else {
-                            return;
-                        };
-
-                        error!("Received an error while attempting to accept connection: {}", e);
-                    }
-                },
-            }
-        },
-
-        DatagramEvent::ConnectionEvent(handle, conn_event) => {
-            let Some(conn) = ep.connections.get_mut(&handle) else {
-                warn!("Received a connection event for a non-existent connection!");
-                return;
-            };
-
-            conn.handle(conn_event);
-        },
-        DatagramEvent::Response(tx) => {
-            let Err(e) = respond(ep, &tx, &send_buffer) else {
-                return;
-            };
-
-            error!("Received an error while transmitting a response: {}", e);
-        },
-    }
-}
-
-fn process_endpoint_datagrams(endpoint: &mut NativeEndpoint, recv_buffer: &mut Vec<u8>, mut send_buffer: &mut Vec<u8>) {
-    let min_buffer_len =
-    endpoint.cfg.0.get_max_udp_payload_size().min(64 * 1024) as usize
-    * endpoint.sock.1.max_gso_segments()
-    * quinn_udp::BATCH_SIZE;
-
-    recv_buffer.resize(min_buffer_len, 0);
-
-    let buffer_len = recv_buffer.len();
-
-    let mut buffer_chunks = recv_buffer.chunks_mut(buffer_len / quinn_udp::BATCH_SIZE).map(IoSliceMut::new);
-
-    //unwrap is safe here because we know we have at least one chunk based on established buffer len.
-    let mut buffer_chunks: [IoSliceMut; quinn_udp::BATCH_SIZE] =  std::array::from_fn(|_| buffer_chunks.next().unwrap());
-
-    let mut metas = [RecvMeta::default(); quinn_udp::BATCH_SIZE];
-
-    loop {
-        match endpoint.sock.1.recv(UdpSockRef::from(&endpoint.sock.0), &mut buffer_chunks, &mut metas) {
-            Ok(dgram_count) => {
-                for (meta, buffer) in metas.iter().zip(buffer_chunks.iter()).take(dgram_count) {
-                    let mut remaining_data = &buffer[0..meta.len];
-
-                    while !remaining_data.is_empty() {
-                        let stride_length = meta.stride.min(remaining_data.len());
-                        let data = &remaining_data[0..stride_length];
-                        remaining_data = &remaining_data[stride_length..];
-
-                        let ecn = meta.ecn.map(|ecn| {
-                            match ecn {
-                                quinn_udp::EcnCodepoint::Ect0 => quinn_proto::EcnCodepoint::Ect0,
-                                quinn_udp::EcnCodepoint::Ect1 => quinn_proto::EcnCodepoint::Ect1,
-                                quinn_udp::EcnCodepoint::Ce => quinn_proto::EcnCodepoint::Ce,
-                            }
-                        });
-
-                        let Some(dgram_event) = endpoint.endpoint.handle(
-                            std::time::Instant::now(),
-                            meta.addr,
-                            meta.dst_ip,
-                            ecn,
-                            data.into(),
-                            &mut send_buffer
-                        ) else {
-                            continue;
-                        };
-
-                        process_datagram_event(endpoint, send_buffer, dgram_event);
-                    }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(other) => {
+                    error!("Received an unexpected error while receiving endpoint datagrams: {:?}", other)
                 }
-            },
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(other) => {
-                error!("Received an unexpected error while receiving endpoint datagrams: {:?}", other)
             }
+        }
+
+        buffers.recv_buffer.clear();
+        buffers.send_buffer.clear();
+    }
+
+    /// processes a datagram event generated after processing a datagram
+    fn process_datagram_event(&mut self, send_buffer: &Vec<u8>, event: DatagramEvent, event_handler: &mut impl EndpointEventHandler) {
+        match event {
+            DatagramEvent::NewConnection(incoming) => {
+                if self.server_config.is_none() {
+                    warn!("Received an incoming connection request despite not being configured for listening on endpoint {}", self.local_addr);
+                    return;
+                }
+
+                let mut response_buffer = Vec::new();
+
+                let transmit = if event_handler.accept_connection(&incoming) {
+                    // accept connection
+
+                    match self.endpoint.accept(incoming, std::time::Instant::now(), &mut response_buffer, None) {
+                        Ok((handle, connection)) => {
+                            let connection_id = ConnectionId(handle);
+                            // connection successful
+
+                            let addr = connection.remote_address();
+                            debug!("Accepting connection on endpoint {} with {}", self.local_addr, addr);
+
+                            if let Some(existing_connection) = self.connections.insert(connection_id, ConnectionState::new(connection, connection_id)) {
+                                error!("A new connection to {} was established on {} using a handle that already existed for connection {}", addr, self.local_addr, existing_connection.remote_address());
+                            }
+
+                            return;
+                        },
+
+                        Err(err) => {
+                            // connection unsuccessful
+
+                            info!("Failed to accept incoming connection: {:?}", err.cause);
+
+                            let Some(transmit) = err.response else {
+                                return;
+                            };
+                            // response needed
+
+                            transmit
+                        },
+                    }
+                } else {
+                    // refuse connection
+
+                    self.endpoint.refuse(incoming, &mut response_buffer)
+                };
+
+                trace!("Sending connection failure reason to peer: {}", transmit.destination);
+
+                if let Err(err) = self.respond(&transmit, &response_buffer) {
+                    error!("Failed to transmit connection response to {}: {}", transmit.destination, err);
+                };
+            },
+
+            DatagramEvent::ConnectionEvent(handle, conn_event) => {
+                let connection_id = ConnectionId(handle);
+
+                let Some(connection) = self.connections.get_mut(&connection_id) else {
+                    warn!("Received a connection event for a non-existent connection!");
+                    return;
+                };
+
+                connection.handle(conn_event);
+            },
+            DatagramEvent::Response(transmit) => {
+                if let Err(err) = self.respond(&transmit, send_buffer) {
+                    error!("Failed to transmit a response: {}", err);
+                };
+            },
         }
     }
 
-    recv_buffer.clear();
-    send_buffer.clear();
-}
+    pub(crate) fn respond(&mut self, transmit: &quinn_proto::Transmit, response_buffer: &[u8]) -> std::io::Result<()> {
+        // convert to `quinn_proto` transmit
+        let transmit = udp_transmit(transmit, response_buffer);
 
+        // send if there is kernal buffer space, else drop it
+        self.socket_state.send(UdpSockRef::from(&self.socket), &transmit)
+    }
 
-pub(crate) fn endpoint_poll_sys(
-    mut ep_q: Query<&mut NativeEndpoint>,
-
-    //Buffers that can be re-used by all endpoints for intermediate processing.
-    mut send_buffer: Local<Vec<u8>>,
-    mut recv_buffer: Local<Vec<u8>>
-) {
-    for mut endpoint in ep_q.iter_mut() {
-        process_endpoint_datagrams(&mut endpoint, &mut recv_buffer, &mut send_buffer);
+    /// updates connection state
+    fn poll_connections(&mut self, buffers: &mut EndpointBuffers, event_handler: &mut impl EndpointEventHandler) {
+        for connection in self.connections.values_mut() {
+            connection.poll_connection(
+                &mut self.endpoint,
+                UdpSockRef::from(&self.socket),
+                &mut self.socket_state,
+                buffers,
+                event_handler,
+            );
+        }
     }
 }
+
+
+//Buffers that can be reused by all endpoints for intermediate processing.
+#[derive(Default)]
+pub struct EndpointBuffers {
+    pub(crate) send_buffer: Vec<u8>,
+    pub(crate) recv_buffer: Vec<u8>,
+}
+
 
 pub(crate) fn udp_transmit<'a>(transmit: &'a quinn_proto::Transmit, buffer: &'a [u8]) -> quinn_udp::Transmit<'a> {
     quinn_udp::Transmit {
@@ -255,33 +266,5 @@ pub(crate) fn udp_transmit<'a>(transmit: &'a quinn_proto::Transmit, buffer: &'a 
         contents: &buffer[0..transmit.size],
         segment_size: transmit.segment_size,
         src_ip: transmit.src_ip,
-    }
-}
-
-pub(crate) fn respond(ep: &mut NativeEndpoint, transmit: &quinn_proto::Transmit, response_buffer: &[u8]) -> std::io::Result<()> {
-    let socket = &mut ep.sock.0;
-    let socket_state = &mut ep.sock.1;
-
-    // convert to `quinn_proto` transmit
-    let transmit = udp_transmit(transmit, response_buffer);
-
-    // send if there is kernal buffer space, else drop it
-    socket_state.send(UdpSockRef::from(&socket), &transmit)
-}
-
-
-use crate::connection::*;
-
-pub struct NativeEndpointPlugin;
-
-impl Plugin for NativeEndpointPlugin {
-    fn build(&self, app: &mut App) {
-        app
-        .add_event::<NewWriteStream>()
-        .add_event::<NewReadStream>()
-        .add_event::<ClosedStream>()
-        .add_event::<Connected>()
-        .add_event::<Disconnected>()
-        .add_systems(Update, (endpoint_poll_sys, connection_poll_sys));
     }
 }
