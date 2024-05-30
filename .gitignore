@@ -1,3 +1,3 @@
 target/
-fullchain.pem
-privkey.pem
+crates/transport/*.pem
+crates/transport/*.pem
