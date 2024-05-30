@@ -5,6 +5,8 @@ use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use transport::prelude::*;
 use transport::bevy::*;
+use transport::web_transport::WebTransportEndpoint;
+use transport::web_transport::WebTransportEndpointPlugin;
 
 fn load_certs() -> rustls::ServerConfig {
     let chain = std::fs::File::open("fullchain.pem").expect("failed to open cert file");
@@ -59,6 +61,7 @@ fn create_endpoint_sys(mut commands: Commands) {
     commands.spawn((
         endpoint,
         BevyEndpoint,
+        WebTransportEndpoint::default()
     ));
 }
 
@@ -94,6 +97,7 @@ fn read_streams(
 
         for data in connection.reader(stream.stream_id).read() {
             stream.data.extend(data.as_ref());
+            println!("Received data from stream: {}", std::str::from_utf8(data.as_ref()).unwrap());
         }
     }
 }
@@ -127,10 +131,11 @@ fn main() {
         .add_plugins(MinimalPlugins)
         .add_plugins(LogPlugin {
             // level: Level::TRACE,
-            level: Level::DEBUG,
+            level: Level::TRACE,
             ..Default::default()
         })
         .add_plugins(BevyEndpointPlugin::default())
+        .add_plugins(WebTransportEndpointPlugin::default())
         .add_systems(Startup, create_endpoint_sys)
         .add_systems(Update, (
             spawn_streams,

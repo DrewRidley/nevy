@@ -23,6 +23,7 @@ impl Default for BevyEndpointPlugin {
     }
 }
 
+
 impl Plugin for BevyEndpointPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<Connected>();
