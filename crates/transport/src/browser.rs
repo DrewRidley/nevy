@@ -1,10 +1,13 @@
 use std::{error, fmt};
 
-use bevy::{app::Plugin, log::warn, tasks::{block_on, AsyncComputeTaskPool, Task}};
+use bevy::{
+    app::Plugin,
+    log::warn,
+    tasks::{AsyncComputeTaskPool, Task},
+};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::WebTransport;
-
 
 #[derive(Debug)]
 pub struct WebError {
@@ -37,7 +40,6 @@ impl From<&str> for WebError {
     }
 }
 
-
 /// A WebTransport endpoint specifically designed for use in the browser via wasm.
 ///
 /// A endpoint may exist without a connection to a server, so operations must be guarded accordingly.
@@ -46,7 +48,12 @@ pub struct BrowserEndpoint {
     inner: Option<web_sys::WebTransport>,
     // Whenever a connection request is made, the url is stored here.
     // The async system will actually instantiate the 'inner' value using this later.
-    connect_task: Option<Task<Result<WebTransport, WebError>>>
+    connect_task: Option<Task<Result<WebTransport, WebError>>>,
+}
+
+enum BrowserPollResult {
+    AcceptedBi(),
+    AcceptedUni(),
 }
 
 impl BrowserEndpoint {
@@ -63,18 +70,14 @@ impl BrowserEndpoint {
 
             Ok(inner)
         }));
-
-        Ok(())
     }
+
+    /// Polls the endpoint for specific events.
+    fn poll() {}
 }
-
-
-
 
 pub struct BrowserEndpointPlugin;
 
 impl Plugin for BrowserEndpointPlugin {
-    fn build(&self, app: &mut bevy::prelude::App) {
-
-    }
+    fn build(&self, app: &mut bevy::prelude::App) {}
 }

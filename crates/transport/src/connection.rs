@@ -1,18 +1,16 @@
-use std::{cell::Cell, net::SocketAddr, str::FromStr, sync::Arc};
-
-use bevy::{prelude::*, utils::{HashMap, HashSet}};
+use bevy::{
+    prelude::*,
+    utils::{HashMap, HashSet},
+};
 use bytes::Bytes;
-use quinn_proto::{Chunks, ConnectionEvent, Dir, RecvStream, StreamId};
+use quinn_proto::{Chunks, ConnectionEvent, RecvStream, StreamId};
 use quinn_udp::{UdpSockRef, UdpSocketState};
-use web_transport_proto::{ConnectRequest, ConnectResponse};
+use std::{net::SocketAddr, sync::Arc};
 
 use crate::{endpoint::udp_transmit, EndpointBuffers, EndpointEventHandler, NewStreamHandler};
 
-
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct ConnectionId(pub(crate) quinn_proto::ConnectionHandle);
-
 
 /// A connection to a peer through a [NativeEndpoint] goverened through [quinn_proto].
 ///
@@ -31,8 +29,24 @@ pub struct ConnectionState {
     pub(crate) new_stream_handler: Option<Arc<dyn NewStreamHandler>>,
 }
 
+pub trait NewStreamHandler: Send + Sync {
+    /// return false to close the stream and not return the stream id to the application
+    fn new_stream(
+        &self,
+        _connection: &mut ConnectionState,
+        _stream_id: StreamId,
+        _direction: quinn_proto::Dir,
+    ) -> bool {
+        true
+    }
+}
+
 impl ConnectionState {
-    pub(crate) fn new(conn: quinn_proto::Connection, connection_id: ConnectionId, new_stream_handler: Option<Arc<dyn NewStreamHandler>>) -> Self {
+    pub(crate) fn new(
+        conn: quinn_proto::Connection,
+        connection_id: ConnectionId,
+        new_stream_handler: Option<Arc<dyn NewStreamHandler>>,
+    ) -> Self {
         Self {
             connection: conn,
             connection_id,
@@ -63,14 +77,17 @@ impl ConnectionState {
     }
 
     pub fn disconnect(&mut self, error_code: quinn_proto::VarInt, reason: Box<[u8]>) {
-        self.connection.close(std::time::Instant::now(), error_code, reason.into());
+        self.connection
+            .close(std::time::Instant::now(), error_code, reason.into());
     }
 
     pub fn reader(&mut self, stream_id: StreamId) -> StreamReader {
         StreamReader {
             ready: if self.readable_streams.contains(&stream_id) {
                 Some((
-                    self.read_responses.entry(stream_id).or_insert_with(|| StreamReaderResponse::IncompleteRead),
+                    self.read_responses
+                        .entry(stream_id)
+                        .or_insert_with(|| StreamReaderResponse::IncompleteRead),
                     self.connection.recv_stream(stream_id),
                 ))
             } else {
@@ -82,8 +99,9 @@ impl ConnectionState {
     pub fn write(&mut self, stream_id: StreamId, data: &[u8]) -> Result<usize, WriteError> {
         match self.connection.send_stream(stream_id).write(data) {
             Err(quinn_proto::WriteError::Blocked) => Err(WriteError::Blocked),
-            Err(quinn_proto::WriteError::ClosedStream) | Err(quinn_proto::WriteError::Stopped(_)) => Err(WriteError::StreamDoesntExist),
-            Ok(bytes) => Ok(bytes)
+            Err(quinn_proto::WriteError::ClosedStream)
+            | Err(quinn_proto::WriteError::Stopped(_)) => Err(WriteError::StreamDoesntExist),
+            Ok(bytes) => Ok(bytes),
         }
     }
 
@@ -98,27 +116,24 @@ impl ConnectionState {
         self.open(quinn_proto::Dir::Bi)
     }
 
-    pub fn open(&mut self, dir: quinn_proto::Dir)-> Option<StreamId> {
-        self.connection.streams().open(dir).and_then(
-            |stream_id| {
-                if let Some(handler) = self.new_stream_handler.take() {
-
-                    let stream_id = if handler.new_stream(self, stream_id, dir) {
-                        debug!("keeping the new stream");
-                        Some(stream_id)
-                    } else {
-                        debug!("cancelling the new stream");
-                        self.finish(stream_id);
-                        None
-                    };
-
-                    self.new_stream_handler = Some(handler);
-                    stream_id
-                } else {
+    pub fn open(&mut self, dir: quinn_proto::Dir) -> Option<StreamId> {
+        self.connection.streams().open(dir).and_then(|stream_id| {
+            if let Some(handler) = self.new_stream_handler.take() {
+                let stream_id = if handler.new_stream(self, stream_id, dir) {
+                    debug!("keeping the new stream");
                     Some(stream_id)
-                }
+                } else {
+                    debug!("cancelling the new stream");
+                    self.finish(stream_id);
+                    None
+                };
+
+                self.new_stream_handler = Some(handler);
+                stream_id
+            } else {
+                Some(stream_id)
             }
-        )
+        })
     }
 
     /// finishes a send stream
@@ -140,10 +155,10 @@ impl ConnectionState {
                 StreamReaderResponse::Blocked => (),
                 StreamReaderResponse::Finished => {
                     event_handler.receive_stream_closed(self, stream_id, None);
-                },
+                }
                 StreamReaderResponse::Reset(error_code) => {
                     event_handler.receive_stream_closed(self, stream_id, Some(error_code));
-                },
+                }
             }
 
             self.readable_streams.remove(&stream_id);
@@ -151,12 +166,16 @@ impl ConnectionState {
 
         let max_datagrams = socket_state.max_gso_segments();
 
-        if let Some(transmit) = self.connection.poll_transmit(std::time::Instant::now(), max_datagrams, &mut buffers.send_buffer) {
+        if let Some(transmit) = self.connection.poll_transmit(
+            std::time::Instant::now(),
+            max_datagrams,
+            &mut buffers.send_buffer,
+        ) {
             match socket_state.send(socket, &udp_transmit(&transmit, &buffers.send_buffer)) {
                 Err(err) => {
                     error!("Transmition error: {}", err);
                     return;
-                },
+                }
                 Ok(()) => (),
             };
         }
@@ -182,7 +201,7 @@ impl ConnectionState {
             match app_event {
                 quinn_proto::Event::HandshakeDataReady => {
                     trace!("Handshake data is ready for peer: {}", peer_addr);
-                },
+                }
                 quinn_proto::Event::Connected => {
                     debug!("Successfully connected to {}", peer_addr);
                     event_handler.new_connection(self);
@@ -196,40 +215,51 @@ impl ConnectionState {
 
                     //     send_settings_client(&mut conn.connection, send_settings);
                     // }
-                },
+                }
                 quinn_proto::Event::ConnectionLost { reason } => {
-                    info!("Connection lost with peer: {} with reason: {}", peer_addr, reason);
+                    info!(
+                        "Connection lost with peer: {} with reason: {}",
+                        peer_addr, reason
+                    );
                     event_handler.disconnected(self);
-                },
+                }
                 quinn_proto::Event::Stream(stream_event) => {
                     match stream_event {
-                        quinn_proto::StreamEvent::Opened { .. } => { },
+                        quinn_proto::StreamEvent::Opened { .. } => {}
                         quinn_proto::StreamEvent::Readable { id } => {
                             self.readable_streams.insert(id);
                             debug!("Stream {} for peer {} is readable..", id, peer_addr);
-                        },
+                        }
                         quinn_proto::StreamEvent::Writable { id } => {
                             trace!("Stream {} for peer {} is writable.", id, peer_addr);
-                        },
+                        }
                         quinn_proto::StreamEvent::Finished { id } => {
                             // this endpoint has finished transmitting all data on some send stream
                             // ack that all data was received after stream was initially requested to be 'finished'.
-                            trace!("finished transmitting on stream {} for peer {}.", id, peer_addr);
-                        },
+                            trace!(
+                                "finished transmitting on stream {} for peer {}.",
+                                id,
+                                peer_addr
+                            );
+                        }
                         quinn_proto::StreamEvent::Stopped { id, error_code } => {
                             // the peer has reset a send stream
-                            trace!("Stream {} for peer {} has been stopped with error: {}", id, peer_addr, error_code);
-                        },
-                        quinn_proto::StreamEvent::Available { .. } => {
-                        },
+                            trace!(
+                                "Stream {} for peer {} has been stopped with error: {}",
+                                id,
+                                peer_addr,
+                                error_code
+                            );
+                        }
+                        quinn_proto::StreamEvent::Available { .. } => {}
                     }
-                },
+                }
                 quinn_proto::Event::DatagramReceived => {
                     trace!("Received a datagram for peer: {}", peer_addr);
-                },
+                }
                 quinn_proto::Event::DatagramsUnblocked => {
                     trace!("Datagrams unblocked for peer: {}", peer_addr);
-                },
+                }
             }
         }
 
@@ -240,7 +270,11 @@ impl ConnectionState {
             // }
 
             let peer_addr = self.connection.remote_address();
-            debug!("Peer: {} opened new bidrectional stream with ID: {}", peer_addr, stream_id.index());
+            debug!(
+                "Peer: {} opened new bidrectional stream with ID: {}",
+                peer_addr,
+                stream_id.index()
+            );
 
             self.readable_streams.insert(stream_id);
             event_handler.new_stream(self, stream_id, true);
@@ -262,7 +296,11 @@ impl ConnectionState {
             // }
 
             let peer_addr = self.connection.remote_address();
-            debug!("Peer: {} opened new unidirectional stream with ID: {}", peer_addr, stream_id.index());
+            debug!(
+                "Peer: {} opened new unidirectional stream with ID: {}",
+                peer_addr,
+                stream_id.index()
+            );
 
             self.readable_streams.insert(stream_id);
             event_handler.new_stream(self, stream_id, false);
@@ -270,12 +308,8 @@ impl ConnectionState {
     }
 }
 
-
 pub struct StreamReader<'a> {
-    ready: Option<(
-        &'a mut StreamReaderResponse,
-        RecvStream<'a>,
-    )>,
+    ready: Option<(&'a mut StreamReaderResponse, RecvStream<'a>)>,
 }
 
 impl<'a> StreamReader<'a> {
@@ -287,29 +321,19 @@ impl<'a> StreamReader<'a> {
         ChunksIter {
             ready: match self.ready.as_mut() {
                 None => None,
-                Some((response, recv)) => {
-                    match recv.read(true) {
-                        Ok(chunks) => Some((response, chunks, max_bytes)),
+                Some((response, recv)) => match recv.read(true) {
+                    Ok(chunks) => Some((response, chunks, max_bytes)),
 
-                        Err(quinn_proto::ReadableError::ClosedStream) => {
-                            None
-                        },
-                        Err(quinn_proto::ReadableError::IllegalOrderedRead) => {
-                            None
-                        },
-                    }
-                }
+                    Err(quinn_proto::ReadableError::ClosedStream) => None,
+                    Err(quinn_proto::ReadableError::IllegalOrderedRead) => None,
+                },
             },
         }
     }
 }
 
 pub struct ChunksIter<'a> {
-    ready: Option<(
-        &'a mut StreamReaderResponse,
-        Chunks<'a>,
-        usize,
-    )>,
+    ready: Option<(&'a mut StreamReaderResponse, Chunks<'a>, usize)>,
 }
 
 impl<'a> Drop for ChunksIter<'a> {
@@ -324,7 +348,6 @@ impl<'a> Iterator for ChunksIter<'a> {
     type Item = Bytes;
 
     fn next(&mut self) -> Option<Self::Item> {
-
         match self.ready.as_mut() {
             None => None,
             Some((response, chunks, max_bytes)) => {
@@ -333,26 +356,25 @@ impl<'a> Iterator for ChunksIter<'a> {
                         // no more data available ever, stream finished
                         **response = StreamReaderResponse::Finished;
                         None
-                    },
+                    }
                     Err(quinn_proto::ReadError::Reset(error_code)) => {
                         // no more data ever, peer reset stream
                         **response = StreamReaderResponse::Reset(error_code);
                         None
-                    },
+                    }
                     Err(quinn_proto::ReadError::Blocked) => {
                         // no more data yet
                         **response = StreamReaderResponse::Blocked;
                         None
-                    },
+                    }
 
                     Ok(Some(chunk)) => {
                         *max_bytes -= chunk.bytes.len();
                         Some(chunk.bytes)
-                    },
+                    }
                 }
             }
         }
-
     }
 }
 
@@ -362,8 +384,6 @@ enum StreamReaderResponse {
     Finished,
     Reset(quinn_proto::VarInt),
 }
-
-
 
 #[derive(Debug)]
 pub enum WriteError {

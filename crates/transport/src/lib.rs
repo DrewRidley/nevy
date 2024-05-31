@@ -1,23 +1,27 @@
-
 use quinn_proto::StreamId;
 
-#[cfg(feature = "browser")]
+// target_arch = "wasm32",
+#[cfg(all(feature = "browser"))]
 mod browser;
 
-pub mod endpoint;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod connection;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod endpoint;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod bevy;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod web_transport;
 
 use connection::*;
 use endpoint::*;
 
-
+#[cfg(not(target_arch = "wasm32"))]
 pub mod prelude {
+    pub use crate::connection::{ConnectionId, ConnectionState, WriteError};
+    pub use crate::endpoint::{EndpointBuffers, EndpointState};
     pub use quinn_proto::StreamId;
-    pub use crate::endpoint::{EndpointState, EndpointBuffers};
-    pub use crate::connection::{ConnectionState, ConnectionId, WriteError};
 }
 
 pub use quinn_proto;
@@ -31,6 +35,12 @@ pub trait EndpointEventHandler {
         true
     }
 
+#[cfg(target_arch = "wasm32")]
+pub mod prelude {}
+
+/// a trait for calling back endpoint events to the relevent implementation
+pub trait EndpointEventHandler {
+>>>>>>> 2c18a5d (Fixed some warnings)
     /// a new connection has been established
     fn new_connection(&mut self, connection: &mut ConnectionState);
 
@@ -40,13 +50,24 @@ pub trait EndpointEventHandler {
     /// the peer opened a new stream
     ///
     /// if the stream is bi directional and there is an associated send stream `bi_directional` will be `true`
-    fn new_stream(&mut self, connection: &mut ConnectionState, stream_id: StreamId, bi_directional: bool);
+    fn new_stream(
+        &mut self,
+        connection: &mut ConnectionState,
+        stream_id: StreamId,
+        bi_directional: bool,
+    );
 
     /// a receive stream has been either finished or reset and no more data will be received
     ///
     /// if the stream was reset then an error message is supplied
-    fn receive_stream_closed(&mut self, connection: &mut ConnectionState, stream_id: StreamId, reset_error: Option<quinn_proto::VarInt>);
+    fn receive_stream_closed(
+        &mut self,
+        connection: &mut ConnectionState,
+        stream_id: StreamId,
+        reset_error: Option<quinn_proto::VarInt>,
+    );
 }
+<<<<<<< HEAD
 
 pub trait NewStreamHandler: Send + Sync {
     /// return false to close the stream and not return the stream id to the application
@@ -54,3 +75,5 @@ pub trait NewStreamHandler: Send + Sync {
         true
     }
 }
+=======
+>>>>>>> 2c18a5d (Fixed some warnings)
