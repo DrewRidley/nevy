@@ -1,8 +1,10 @@
 
-use std::hint::black_box;
+use std::{hint::black_box, str::FromStr};
 
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*, utils::{intern::Interned, HashMap}};
-use web_transport_proto::{ConnectRequest, ConnectResponse, Settings};
+use quinn_proto::VarInt;
+use url::Url;
+use web_transport_proto::{ConnectRequest, ConnectResponse, Frame, Settings};
 
 use crate::{bevy::*, prelude::*, EndpointEventHandler, StreamReader};
 
@@ -74,12 +76,16 @@ enum HandshakeReceiveStream {
 }
 
 enum HandshakeSendStream {
+    // We are populating the buffer with the settings to be sent.
+    GenerateSettings,
     /// We are sending our settings to the peer (server).
     SendSettings(StreamId),
     // We are waiting for the peer to open uni >> us with the response to our settings.
-    WaitSettingsResponse,
+    WaitSettingStream,
+    /// we have the unidirectional stream expected and are reading the data.
+    ReceiveSettings(StreamId),
     // We opened a bi stream and sent our connect request.
-    SendConnect,
+    SendConnect(StreamId),
     // We are now waiting to receive a connect response in the bidirectional channel from the server.
     ReceivingConnectResponse(StreamId),
 }
@@ -166,12 +172,109 @@ fn update_endpoints(
             match uninitialized_connection {
                 UninitializedConnection::Client { state, buffer } => {
                     match state {
-                        HandshakeSendStream::SendSettings(stream) => {
+                        HandshakeSendStream::GenerateSettings => {
+                            let mut settings = Settings::default();
+                            settings.enable_webtransport(1);
+                            settings.encode(buffer);
 
+                            let Some(stream) = connection.open_uni() else {
+                                warn!("Unable to open unidirectional stream to negotiate settings...");
+                                *uninitialized_connection = UninitializedConnection::Failed;
+                                return true;
+                            };
+
+                            *state = HandshakeSendStream::SendSettings(stream);
+                        }
+                        HandshakeSendStream::SendSettings(stream) => {
+                            match connection.write(*stream, buffer) {
+                                Ok(written) => {
+                                    trace!("Wrote {written} of {} bytes", buffer.len());
+                                    // If we finished writing, we now can wait for the response.
+                                    if written == buffer.len() {
+                                        trace!("Sent full settings. Waiting for reply...");
+                                        buffer.clear();
+                                        *state = HandshakeSendStream::WaitSettingStream;
+                                    } else {
+                                        // Otherwise, keep the remaining bytes in the buffer
+                                        trace!("Partial write of settings to server. Draining bytes to complete sending next tick.");
+                                        buffer.drain(..written);
+                                    }
+                                },
+                                Err(e) => {
+                                    // Log the error
+                                    warn!("Error writing settings response: {:?}", e);
+                                    *uninitialized_connection = UninitializedConnection::Failed;
+                                },
+                            }
                         },
-                        HandshakeSendStream::WaitSettingsResponse => todo!(),
-                        HandshakeSendStream::SendConnect => todo!(),
-                        HandshakeSendStream::ReceivingConnectResponse(_) => todo!(),
+                        HandshakeSendStream::WaitSettingStream => (),
+                        HandshakeSendStream::ReceiveSettings(stream) => {
+                            let reader = connection.reader(*stream);
+                            match read_settings(reader, buffer) {
+                                ReadResult::Wait => {
+                                    trace!("Blocking to receive settings from server.");
+                                    return true;
+                                },
+                                ReadResult::Success => {
+                                    let Some(stream) = connection.open_bi() else {
+                                        warn!("Received acceptable settings from server but was unable to open bidirectional stream for CONNECT");
+                                        *uninitialized_connection = UninitializedConnection::Failed;
+                                        return true;
+                                    };
+
+                                    trace!("Opened stream after valid settings response. Sending CONNECT request.");
+                                    buffer.clear();
+                                    let connect_req = ConnectRequest { url: Url::from_str("Hello").unwrap() };
+                                    connect_req.encode(buffer);
+                                    *state = HandshakeSendStream::SendConnect(stream);
+                                },
+                                ReadResult::Fail => {
+                                    info!("Failed to read WebTransport settings from server.");
+                                    *uninitialized_connection = UninitializedConnection::Failed;
+                                    return true;
+                                }
+                            }
+                        },
+                        HandshakeSendStream::SendConnect(stream) => {
+                            match connection.write(*stream, buffer) {
+                                Ok(written) => {
+                                    trace!("Wrote {written} of {} bytes", buffer.len());
+                                    // If we finished writing, we now can wait for the response.
+                                    if written == buffer.len() {
+                                        trace!("Sent full settings. Waiting for reply...");
+                                        buffer.clear();
+                                        *state = HandshakeSendStream::ReceivingConnectResponse(*stream);
+                                    } else {
+                                        // Otherwise, keep the remaining bytes in the buffer
+                                        trace!("Partial write of settings to server. Draining bytes to complete sending next tick.");
+                                        buffer.drain(..written);
+                                    }
+                                },
+                                Err(e) => {
+                                    // Log the error
+                                    warn!("Error writing settings response: {:?}", e);
+                                    *uninitialized_connection = UninitializedConnection::Failed;
+                                },
+                            }
+                        },
+                        HandshakeSendStream::ReceivingConnectResponse(stream) => {
+                            let reader = connection.reader(*stream);
+                            match read_settings(reader, buffer) {
+                                ReadResult::Wait => {
+                                    trace!("Blocking to receive connect from server.");
+                                    return true;
+                                },
+                                ReadResult::Success => {
+                                    info!("Fully established WebTransport connection with the server.");
+                                    return false;
+                                },
+                                ReadResult::Fail => {
+                                    info!("Failed to read WebTransport settings from server.");
+                                    *uninitialized_connection = UninitializedConnection::Failed;
+                                    return true;
+                                }
+                            }
+                        },
                     }
                 },
                 UninitializedConnection::Server { state, buffer } => {
@@ -298,18 +401,9 @@ impl<'a, 'w> EndpointEventHandler for WebTransportEventHandler<'a, 'w> {
 
         let uninitialized_connection = match connection.side() {
             quinn_proto::Side::Client => {
-                debug!("Sending WebTransport SETTINGs frame");
-
-                let mut settings = web_transport_proto::Settings::default();
-                settings.enable_webtransport(1);
-
-                let mut buffer = Vec::new();
-                settings.encode(&mut buffer);
-
-                let handshake_stream = connection.open_uni().unwrap();
-
+                debug!("Initializing WebTransport client state. Sending settings.");
                 UninitializedConnection::Client {
-                    state: HandshakeSendStream::SendSettings(handshake_stream),
+                    state: HandshakeSendStream::GenerateSettings,
                     buffer: Vec::with_capacity(u16::MAX as usize)
                 }
             },
@@ -341,14 +435,25 @@ impl<'a, 'w> EndpointEventHandler for WebTransportEventHandler<'a, 'w> {
         if let Some(uninitialized_connection) = self.web_transport.uninitialized_connections.get_mut(&connection.connection_id()) {
             trace!("Stream was associated with a pending connection.");
             match uninitialized_connection {
-                UninitializedConnection::Client { state, buffer } => {
-
+                UninitializedConnection::Client { state, buffer: _ } => {
+                    match state {
+                        HandshakeSendStream::WaitSettingStream => {
+                            if bi_directional {
+                                info!("WebTransport peer opened a bidirectional stream when a unidirectional one was expected!");
+                                *uninitialized_connection = UninitializedConnection::Failed;
+                                self.bevy.new_stream(connection, stream_id, bi_directional);
+                                return;
+                            }
+                            *state = HandshakeSendStream::ReceiveSettings(stream_id)
+                        },
+                        _ => ()
+                    }
                 },
-                UninitializedConnection::Server { state, buffer: receive_buffer } => {
+                UninitializedConnection::Server { state, buffer: _ } => {
                     match state {
                         HandshakeReceiveStream::SettingsWait => {
                             if bi_directional {
-                                warn!("WebTransport peer opened a bidirectional stream when a unidirectional one was expected!");
+                                info!("WebTransport peer opened a bidirectional stream when a unidirectional one was expected!");
                                 *uninitialized_connection = UninitializedConnection::Failed;
                                 self.bevy.new_stream(connection, stream_id, bi_directional);
                                 return;
@@ -358,7 +463,7 @@ impl<'a, 'w> EndpointEventHandler for WebTransportEventHandler<'a, 'w> {
                         },
                         HandshakeReceiveStream::ConnectWait => {
                             if !bi_directional {
-                                warn!("WebTransport peer opened a unidirectional stream when a bidirectional one was expected!");
+                                info!("WebTransport peer opened a unidirectional stream when a bidirectional one was expected!");
                                 *uninitialized_connection = UninitializedConnection::Failed;
                                 self.bevy.new_stream(connection, stream_id, bi_directional);
                                 return;
@@ -379,6 +484,19 @@ impl<'a, 'w> EndpointEventHandler for WebTransportEventHandler<'a, 'w> {
             }
 
             return;
+        }
+
+        let mut reader = connection.reader(stream_id);
+        if let Some(data) = reader.read().next() {
+            let header = Frame::decode(&mut data.as_ref());
+            let Ok(frame) = header else {
+                warn!("WebTransport is enabled but stream did not begin with a valid frame!");
+                return;
+            };
+
+            if frame.0 != web_transport_proto::VarInt::from_u32(0x41) {
+                warn!("Stream was expected to begin with 0x41 (WebTransport) but began with {:?} instead.", frame);
+            }
         }
 
         self.bevy.new_stream(connection, stream_id, bi_directional);

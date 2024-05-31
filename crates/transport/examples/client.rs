@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bevy::{log::{Level, LogPlugin}, prelude::*};
 use quinn_proto::crypto::rustls::QuicClientConfig;
-use transport::prelude::*;
+use transport::{prelude::*, web_transport::{WebTransportEndpoint, WebTransportEndpointPlugin}};
 use transport::bevy::*;
 
 
@@ -21,6 +21,7 @@ fn create_endpoint_sys(mut cmds: Commands) {
     cmds.spawn((
         endpoint,
         BevyEndpoint,
+        WebTransportEndpoint::default()
     ));
 }
 
@@ -43,10 +44,11 @@ fn main() {
         .add_plugins(MinimalPlugins)
         .add_plugins(LogPlugin {
             // level: Level::TRACE,
-            level: Level::DEBUG,
+            level: Level::TRACE,
             ..Default::default()
         })
         .add_plugins(BevyEndpointPlugin::default())
+        .add_plugins(WebTransportEndpointPlugin::default())
         .add_systems(Startup, create_endpoint_sys)
         .add_systems(Update, send_message)
         .run();

@@ -88,6 +88,10 @@ impl ConnectionState {
         self.connection.streams().open(Dir::Uni)
     }
 
+    pub fn open_bi(&mut self) -> Option<StreamId> {
+        self.connection.streams().open(Dir::Bi)
+    }
+
     /// finishes a send stream
     pub fn finish(&mut self, stream_id: StreamId) {
         let _ = self.connection.send_stream(stream_id).finish();

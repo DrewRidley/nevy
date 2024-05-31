@@ -97,6 +97,7 @@ fn read_streams(
 
         for data in connection.reader(stream.stream_id).read() {
             stream.data.extend(data.as_ref());
+            println!("Received data from stream: {:?}", data.as_ref());
             println!("Received data from stream: {}", std::str::from_utf8(data.as_ref()).unwrap());
         }
     }
