@@ -3245,6 +3245,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "web_transport"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "transport",
+]
+
+[[package]]
 name = "webpki-roots"
 version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

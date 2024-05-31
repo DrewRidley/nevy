@@ -6,7 +6,7 @@ use quinn_proto::{Chunks, ConnectionEvent, Dir, RecvStream, StreamId};
 use quinn_udp::{UdpSockRef, UdpSocketState};
 use web_transport_proto::{ConnectRequest, ConnectResponse};
 
-use crate::{endpoint::udp_transmit, EndpointBuffers, EndpointEventHandler};
+use crate::{endpoint::udp_transmit, EndpointBuffers, EndpointEventHandler, NewStreamHandler};
 
 
 
@@ -29,13 +29,6 @@ pub struct ConnectionState {
     /// Excludes streams that are currently blocked or otherwise congested.
     read_responses: HashMap<StreamId, StreamReaderResponse>,
     pub(crate) new_stream_handler: Option<Arc<dyn NewStreamHandler>>,
-}
-
-pub trait NewStreamHandler: Send + Sync {
-    /// return false to close the stream and not return the stream id to the application
-    fn new_stream(&self, connection: &mut ConnectionState, stream_id: StreamId, direction: quinn_proto::Dir) -> bool {
-        true
-    }
 }
 
 impl ConnectionState {

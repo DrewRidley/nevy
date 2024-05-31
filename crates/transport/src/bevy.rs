@@ -47,22 +47,11 @@ fn update_endpoints(
     mut buffers: Local<EndpointBuffers>,
 ) {
     for (endpoint_entity, mut endpoint) in endpoint_q.iter_mut() {
-        endpoint.update(&mut buffers, &mut BevyEndpointEventHandler {
-            events: &mut events,
-            endpoint_entity,
-        });
+        endpoint.update(&mut buffers, &mut events.handler(endpoint_entity));
     }
 }
 
 
-
-#[derive(bevy::ecs::system::SystemParam)]
-pub struct BevyEndpointEvents<'w> {
-    pub connected: EventWriter<'w, Connected>,
-    pub disconnected: EventWriter<'w, Disconnected>,
-    pub new_stream: EventWriter<'w, NewStream>,
-    pub receive_stream_closed: EventWriter<'w, ReceiveStreamClosed>,
-}
 
 #[derive(Event)]
 pub struct Connected {
@@ -92,11 +81,26 @@ pub struct ReceiveStreamClosed {
     pub reset_error: Option<quinn_proto::VarInt>,
 }
 
-
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct BevyEndpointEvents<'w> {
+    pub connected: EventWriter<'w, Connected>,
+    pub disconnected: EventWriter<'w, Disconnected>,
+    pub new_stream: EventWriter<'w, NewStream>,
+    pub receive_stream_closed: EventWriter<'w, ReceiveStreamClosed>,
+}
 
 pub struct BevyEndpointEventHandler<'a, 'w> {
     pub events: &'a mut BevyEndpointEvents<'w>,
     pub endpoint_entity: Entity,
+}
+
+impl<'w> BevyEndpointEvents<'w> {
+    pub fn handler<'a>(&'a mut self, endpoint_entity: Entity) -> BevyEndpointEventHandler<'a, 'w> {
+        BevyEndpointEventHandler {
+            events: self,
+            endpoint_entity,
+        }
+    }
 }
 
 impl<'a, 'w> EndpointEventHandler for BevyEndpointEventHandler<'a, 'w> {

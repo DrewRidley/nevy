@@ -20,10 +20,13 @@ pub mod prelude {
     pub use crate::connection::{ConnectionState, ConnectionId, WriteError};
 }
 
+pub use quinn_proto;
+
 
 /// a trait for calling back endpoint events to the relevent implementation
 pub trait EndpointEventHandler {
     /// called to ask if a new incoming connection should be accepted
+    #[allow(unused_variables)]
     fn accept_connection(&mut self, incoming: &quinn_proto::Incoming) -> bool {
         true
     }
@@ -45,18 +48,9 @@ pub trait EndpointEventHandler {
     fn receive_stream_closed(&mut self, connection: &mut ConnectionState, stream_id: StreamId, reset_error: Option<quinn_proto::VarInt>);
 }
 
-
-
-// pub struct NativeEndpointPlugin;
-
-// impl Plugin for NativeEndpointPlugin {
-//     fn build(&self, app: &mut App) {
-//         app
-//         .add_event::<NewWriteStream>()
-//         .add_event::<NewReadStream>()
-//         .add_event::<ClosedStream>()
-//         .add_event::<Connected>()
-//         .add_event::<Disconnected>()
-//         .add_systems(Update, (endpoint_poll_sys, connection_poll_sys));
-//     }
-// }
+pub trait NewStreamHandler: Send + Sync {
+    /// return false to close the stream and not return the stream id to the application
+    fn new_stream(&self, connection: &mut ConnectionState, stream_id: StreamId, direction: quinn_proto::Dir) -> bool {
+        true
+    }
+}
