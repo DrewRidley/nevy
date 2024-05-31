@@ -1,12 +1,11 @@
 
-use std::{hint::black_box, str::FromStr};
+use std::str::FromStr;
 
-use bevy::{ecs::schedule::ScheduleLabel, prelude::*, utils::{intern::Interned, HashMap}};
-use quinn_proto::VarInt;
+use bevy::{ecs::schedule::{OrElse, ScheduleLabel}, prelude::*, utils::intern::Interned};
 use url::Url;
 use web_transport_proto::{ConnectRequest, ConnectResponse, Frame, Settings};
 
-use crate::{bevy::*, prelude::*, EndpointEventHandler, StreamReader};
+use crate::{bevy::*, prelude::*, EndpointEventHandler, NewStreamHandler, StreamReader};
 
 
 /// adds web transport functionality for the [WebTransportEndpoint] component
@@ -125,7 +124,7 @@ fn read_settings(mut reader: StreamReader, buffer: &mut Vec<u8>) -> ReadResult {
         }
     }
 
-    ReadResult::Fail
+    ReadResult::Wait
 }
 
 fn read_connect(mut reader: StreamReader, buffer: &mut Vec<u8>) -> ReadResult {
@@ -148,7 +147,48 @@ fn read_connect(mut reader: StreamReader, buffer: &mut Vec<u8>) -> ReadResult {
         }
     }
 
-    ReadResult::Fail
+    ReadResult::Wait
+}
+
+fn read_connect_response(mut reader: StreamReader, buffer: &mut Vec<u8>) -> ReadResult {
+    for chunk in reader.read() {
+        buffer.extend_from_slice(&chunk);
+        let mut limit = std::io::Cursor::new(&buffer);
+        match ConnectResponse::decode(&mut limit) {
+            Ok(req) => {
+                debug!("Received CONNECT headers ({:?}) from WebTransport peer.", req);
+                return ReadResult::Success;
+            },
+            Err(web_transport_proto::ConnectError::UnexpectedEnd) => {
+                trace!("Partially read CONNECT request. Buffering...");
+                continue;
+            },
+            Err(e) => {
+                error!("Error parsing WebTransport CONNECT header: {}", e);
+                return ReadResult::Fail;
+            }
+        }
+    }
+
+    ReadResult::Wait
+}
+
+struct WebTransportHeaderWriter;
+
+impl NewStreamHandler for WebTransportHeaderWriter {
+    fn new_stream(&self, connection: &mut ConnectionState, stream_id: StreamId, _direction: quinn_proto::Dir) -> bool {
+        let mut buffer = vec![];
+        Frame::WEBTRANSPORT.encode(&mut buffer);
+
+        match connection.write(stream_id, &buffer) {
+            Ok(n) if n < buffer.len() => (),
+            Err(_) => (),
+            _ => return true,
+        };
+
+        error!("Client established a stream but was unable to transmit required WebTransport headers!");
+        false
+    }
 }
 
 
@@ -158,6 +198,7 @@ fn update_endpoints(
     mut buffers: Local<EndpointBuffers>,
 ) {
     for (endpoint_entity, mut endpoint, mut web_transport) in endpoint_q.iter_mut() {
+
         endpoint.update(&mut buffers, &mut WebTransportEventHandler {
             bevy: BevyEndpointEventHandler {
                 events: &mut events,
@@ -165,6 +206,11 @@ fn update_endpoints(
             },
             web_transport: &mut web_transport,
         });
+
+        let mut bevy = BevyEndpointEventHandler {
+            events: &mut events,
+            endpoint_entity,
+        };
 
         web_transport.uninitialized_connections.retain(|&connection_id, uninitialized_connection| {
             let connection = endpoint.get_connection_mut(connection_id).expect("events have been processed, connection should exist");
@@ -224,7 +270,7 @@ fn update_endpoints(
 
                                     trace!("Opened stream after valid settings response. Sending CONNECT request.");
                                     buffer.clear();
-                                    let connect_req = ConnectRequest { url: Url::from_str("Hello").unwrap() };
+                                    let connect_req = ConnectRequest { url: Url::from_str("https://nevyclient.app").unwrap() };
                                     connect_req.encode(buffer);
                                     *state = HandshakeSendStream::SendConnect(stream);
                                 },
@@ -258,14 +304,16 @@ fn update_endpoints(
                             }
                         },
                         HandshakeSendStream::ReceivingConnectResponse(stream) => {
-                            let reader = connection.reader(*stream);
-                            match read_settings(reader, buffer) {
+                            let reader: StreamReader = connection.reader(*stream);
+                            match read_connect_response(reader, buffer) {
                                 ReadResult::Wait => {
                                     trace!("Blocking to receive connect from server.");
                                     return true;
                                 },
                                 ReadResult::Success => {
+                                    connection.set_new_stream_handler(Some(std::sync::Arc::new(WebTransportHeaderWriter)));
                                     info!("Fully established WebTransport connection with the server.");
+                                    bevy.new_connection(connection);
                                     return false;
                                 },
                                 ReadResult::Fail => {
@@ -366,6 +414,8 @@ fn update_endpoints(
                                     if written == buffer.len() {
                                         trace!("Wrote {written} bytes to send the connect response");
                                         info!("Successfully negotiated WebTransport connection with peer.");
+                                        connection.set_new_stream_handler(Some(std::sync::Arc::new(WebTransportHeaderWriter)));
+                                        bevy.new_connection(connection);
                                         return false;
                                     } else {
                                         // Otherwise, keep the remaining bytes in the buffer
@@ -381,7 +431,9 @@ fn update_endpoints(
                         },
                     }
                 },
-                UninitializedConnection::Failed => todo!(),
+                UninitializedConnection::Failed => {
+
+                },
             }
 
             true
@@ -408,7 +460,7 @@ impl<'a, 'w> EndpointEventHandler for WebTransportEventHandler<'a, 'w> {
                 }
             },
             quinn_proto::Side::Server => {
-                trace!("Initializing WebTransport server state. Waiting for stream...");
+                debug!("Initializing WebTransport server state. Waiting for stream...");
                 UninitializedConnection::Server {
                     state: HandshakeReceiveStream::SettingsWait,
                     buffer: Vec::with_capacity(u16::MAX as usize)
@@ -433,15 +485,15 @@ impl<'a, 'w> EndpointEventHandler for WebTransportEventHandler<'a, 'w> {
         // catch the streams needed to initialize web transport, otherwise fire new stream events
         debug!("WebTransport handler received a new stream");
         if let Some(uninitialized_connection) = self.web_transport.uninitialized_connections.get_mut(&connection.connection_id()) {
-            trace!("Stream was associated with a pending connection.");
+            debug!("Stream was associated with a pending connection.");
             match uninitialized_connection {
-                UninitializedConnection::Client { state, buffer: _ } => {
+                UninitializedConnection::Client { state, .. } => {
                     match state {
                         HandshakeSendStream::WaitSettingStream => {
                             if bi_directional {
+                                self.bevy.new_stream(connection, stream_id, bi_directional);
                                 info!("WebTransport peer opened a bidirectional stream when a unidirectional one was expected!");
                                 *uninitialized_connection = UninitializedConnection::Failed;
-                                self.bevy.new_stream(connection, stream_id, bi_directional);
                                 return;
                             }
                             *state = HandshakeSendStream::ReceiveSettings(stream_id)
@@ -449,7 +501,7 @@ impl<'a, 'w> EndpointEventHandler for WebTransportEventHandler<'a, 'w> {
                         _ => ()
                     }
                 },
-                UninitializedConnection::Server { state, buffer: _ } => {
+                UninitializedConnection::Server { state, .. } => {
                     match state {
                         HandshakeReceiveStream::SettingsWait => {
                             if bi_directional {
@@ -459,7 +511,9 @@ impl<'a, 'w> EndpointEventHandler for WebTransportEventHandler<'a, 'w> {
                                 return;
                             }
 
+                            debug!("waiting for connection settings on {}", stream_id);
                             *state = HandshakeReceiveStream::ReceivingSettings(stream_id);
+                            return;
                         },
                         HandshakeReceiveStream::ConnectWait => {
                             if !bi_directional {
@@ -469,7 +523,9 @@ impl<'a, 'w> EndpointEventHandler for WebTransportEventHandler<'a, 'w> {
                                 return;
                             }
 
+                            debug!("Peer opened a bidirectional stream to send connect data!");
                             *state = HandshakeReceiveStream::ReceivingConnect(stream_id);
+                            return;
                         },
                         //If a stream is opened during other states it can be passed through to the application.
                         //This allows streams to be opportunistically opened during WebTransport negotiation.
@@ -480,6 +536,7 @@ impl<'a, 'w> EndpointEventHandler for WebTransportEventHandler<'a, 'w> {
                     connection.disconnect(quinn_proto::VarInt::from_u32(55), "WebTransport is enabled but peer did not behave as expected".as_bytes().into());
                     info!("Peer did not follow expected WebTransport protocol and was forcibly disconnected!");
                     self.web_transport.uninitialized_connections.remove(&connection.connection_id());
+                    return;
                 },
             }
 
@@ -487,52 +544,32 @@ impl<'a, 'w> EndpointEventHandler for WebTransportEventHandler<'a, 'w> {
         }
 
         let mut reader = connection.reader(stream_id);
-        if let Some(data) = reader.read().next() {
-            let header = Frame::decode(&mut data.as_ref());
-            let Ok(frame) = header else {
-                warn!("WebTransport is enabled but stream did not begin with a valid frame!");
-                return;
-            };
 
-            if frame.0 != web_transport_proto::VarInt::from_u32(0x41) {
-                warn!("Stream was expected to begin with 0x41 (WebTransport) but began with {:?} instead.", frame);
+        'b: {
+            let mut bytes = vec![];
+            while let Some(byte) = reader.read_up_to(1).next() {
+                bytes.extend(byte.as_ref());
+                match Frame::decode(&mut bytes.as_ref()) {
+                    Ok(_) => break 'b,
+                    Err(web_transport_proto::VarIntUnexpectedEnd) => continue,
+                }
             }
+
+            macro_rules! fucking_error {
+                ($t:tt) => {
+                    error!($t);
+                };
+            }
+
+            fucking_error!("Client behaved bad. Evil client disconnected :(");
+            connection.disconnect(quinn_proto::VarInt::from_u32(4000), "Evil clients are banned".as_bytes().into());
         }
+
 
         self.bevy.new_stream(connection, stream_id, bi_directional);
     }
 
     fn receive_stream_closed(&mut self, connection: &mut crate::ConnectionState, stream_id: quinn_proto::StreamId, reset_error: Option<quinn_proto::VarInt>) {
-        // dont fire closed stream events for the web transport streams
-
-        // if let Some(uninitialized_connection) = self.web_transport.uninitialized_connections.get_mut(&connection.connection_id()) {
-        //     match uninitialized_connection {
-        //         UninitializedConnection::Client { .. } => (),
-
-        //         UninitializedConnection::Server { state, receive_buffer } => {
-        //             if let HandshakeReceiveStream::Receiving { stream_id: handshake_stream_id, handshake_data } = &handshake_stream {
-        //                 if *handshake_stream_id == stream_id {
-
-        //                     if let Some(reset_error) = reset_error {
-        //                         // fail the web transport connection
-        //                         connection.disconnect(0u32.into(), [].into());
-        //                         *uninitialized_connection = UninitializedConnection::Failed;
-        //                         return;
-        //                     }
-
-        //                     debug!("finished receiving web transport handshake data {:?}", handshake_data);
-
-        //                     *handshake_stream = HandshakeReceiveStream::Received;
-        //                 }
-        //             }
-        //         },
-
-        //         UninitializedConnection::Failed => (),
-        //     }
-
-        //     return;
-        // }
-
         self.bevy.receive_stream_closed(connection, stream_id, reset_error);
     }
 }

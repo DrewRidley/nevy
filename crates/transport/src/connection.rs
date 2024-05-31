@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, str::FromStr};
+use std::{cell::Cell, net::SocketAddr, str::FromStr, sync::Arc};
 
 use bevy::{prelude::*, utils::{HashMap, HashSet}};
 use bytes::Bytes;
@@ -28,16 +28,29 @@ pub struct ConnectionState {
     /// Streams that are currently available for writes.
     /// Excludes streams that are currently blocked or otherwise congested.
     read_responses: HashMap<StreamId, StreamReaderResponse>,
+    pub(crate) new_stream_handler: Option<Arc<dyn NewStreamHandler>>,
+}
+
+pub trait NewStreamHandler: Send + Sync {
+    /// return false to close the stream and not return the stream id to the application
+    fn new_stream(&self, connection: &mut ConnectionState, stream_id: StreamId, direction: quinn_proto::Dir) -> bool {
+        true
+    }
 }
 
 impl ConnectionState {
-    pub(crate) fn new(conn: quinn_proto::Connection, connection_id: ConnectionId) -> Self {
+    pub(crate) fn new(conn: quinn_proto::Connection, connection_id: ConnectionId, new_stream_handler: Option<Arc<dyn NewStreamHandler>>) -> Self {
         Self {
             connection: conn,
             connection_id,
             readable_streams: HashSet::new(),
             read_responses: HashMap::new(),
+            new_stream_handler,
         }
+    }
+
+    pub fn set_new_stream_handler(&mut self, handler: Option<Arc<dyn NewStreamHandler>>) {
+        self.new_stream_handler = handler;
     }
 
     pub fn connection_id(&self) -> ConnectionId {
@@ -85,11 +98,34 @@ impl ConnectionState {
     ///
     /// fails if there are too many streams
     pub fn open_uni(&mut self) -> Option<StreamId> {
-        self.connection.streams().open(Dir::Uni)
+        self.open(quinn_proto::Dir::Uni)
     }
 
     pub fn open_bi(&mut self) -> Option<StreamId> {
-        self.connection.streams().open(Dir::Bi)
+        self.open(quinn_proto::Dir::Bi)
+    }
+
+    pub fn open(&mut self, dir: quinn_proto::Dir)-> Option<StreamId> {
+        self.connection.streams().open(dir).and_then(
+            |stream_id| {
+                if let Some(handler) = self.new_stream_handler.take() {
+
+                    let stream_id = if handler.new_stream(self, stream_id, dir) {
+                        debug!("keeping the new stream");
+                        Some(stream_id)
+                    } else {
+                        debug!("cancelling the new stream");
+                        self.finish(stream_id);
+                        None
+                    };
+
+                    self.new_stream_handler = Some(handler);
+                    stream_id
+                } else {
+                    Some(stream_id)
+                }
+            }
+        )
     }
 
     /// finishes a send stream
@@ -125,12 +161,10 @@ impl ConnectionState {
         if let Some(transmit) = self.connection.poll_transmit(std::time::Instant::now(), max_datagrams, &mut buffers.send_buffer) {
             match socket_state.send(socket, &udp_transmit(&transmit, &buffers.send_buffer)) {
                 Err(err) => {
-                    error!("A transmission error occured while sending a connection response: {}", err);
+                    error!("Transmition error: {}", err);
                     return;
                 },
-                Ok(()) => {
-                    trace!("Sent connection reponse to peer.");
-                }
+                Ok(()) => (),
             };
         }
 
@@ -253,12 +287,16 @@ pub struct StreamReader<'a> {
 
 impl<'a> StreamReader<'a> {
     pub fn read(&mut self) -> ChunksIter {
+        self.read_up_to(usize::MAX)
+    }
+
+    pub fn read_up_to(&mut self, max_bytes: usize) -> ChunksIter {
         ChunksIter {
             ready: match self.ready.as_mut() {
                 None => None,
                 Some((response, recv)) => {
                     match recv.read(true) {
-                        Ok(chunks) => Some((response, chunks)),
+                        Ok(chunks) => Some((response, chunks, max_bytes)),
 
                         Err(quinn_proto::ReadableError::ClosedStream) => {
                             None
@@ -277,12 +315,13 @@ pub struct ChunksIter<'a> {
     ready: Option<(
         &'a mut StreamReaderResponse,
         Chunks<'a>,
+        usize,
     )>,
 }
 
 impl<'a> Drop for ChunksIter<'a> {
     fn drop(&mut self) {
-        if let Some((_, chunks)) = self.ready.take() {
+        if let Some((_, chunks, _)) = self.ready.take() {
             let _ = chunks.finalize();
         }
     }
@@ -295,8 +334,8 @@ impl<'a> Iterator for ChunksIter<'a> {
 
         match self.ready.as_mut() {
             None => None,
-            Some((response, chunks)) => {
-                match chunks.next(usize::MAX) {
+            Some((response, chunks, max_bytes)) => {
+                match chunks.next(*max_bytes) {
                     Ok(None) => {
                         // no more data available ever, stream finished
                         **response = StreamReaderResponse::Finished;
@@ -313,7 +352,10 @@ impl<'a> Iterator for ChunksIter<'a> {
                         None
                     },
 
-                    Ok(Some(chunk)) => Some(chunk.bytes),
+                    Ok(Some(chunk)) => {
+                        *max_bytes -= chunk.bytes.len();
+                        Some(chunk.bytes)
+                    },
                 }
             }
         }
@@ -334,199 +376,4 @@ enum StreamReaderResponse {
 pub enum WriteError {
     Blocked,
     StreamDoesntExist,
-}
-
-
-
-// Sends the 'SETTINGs' frame through the specified outbound unidirectional stream.
-fn send_settings_client(conn: &mut quinn_proto::Connection, uni: StreamId) {
-    let mut settings = web_transport_proto::Settings::default();
-    settings.enable_webtransport(1);
-
-    debug!("Sending WebTransport SETTINGs frame");
-
-    let mut buf = Vec::new();
-    settings.encode(&mut buf);
-
-    if let Err(e) =  conn.send_stream(uni).write(&buf) {
-        warn!("Received an error while sending WebTransport SETTINGs frame: {}", e);
-    }
-}
-
-// Processes the SETTINGs response received in the inbound unidirectional stream, 'uni'.
-fn receive_settings_client(conn: &mut quinn_proto::Connection, uni: StreamId) {
-    let mut buf = Vec::new();
-
-    // First, read the entire stream
-    if let Ok(mut reader) = conn.recv_stream(uni).read(true) {
-        loop {
-            if let Some(chunk) = reader.next(usize::MAX).ok() {
-                // Unwrap the Option<Chunk> to get the Chunk
-                let chunk = chunk.unwrap();
-                buf.extend_from_slice(&chunk.bytes);
-                let mut limit = std::io::Cursor::new(&buf);
-
-                match web_transport_proto::Settings::decode(&mut limit) {
-                    Ok(settings) => {
-                        trace!("Received SETTINGS frame: {:?}", settings);
-                        if settings.supports_webtransport() == 0 {
-                            info!("Server does not support WebTransport!");
-                        } else {
-                            trace!("Server supports WebTransport.");
-                        }
-                        let _ = reader.finalize();
-                        break;
-                    }
-                    Err(web_transport_proto::SettingsError::UnexpectedEnd) => continue,
-                    Err(e) => {
-                        warn!("Received an error while decoding WebTransport settings response: {}", e);
-                        let _ = reader.finalize();
-                        return;
-                    }
-                }
-            } else {
-                warn!("Error reading from stream");
-                let _ = reader.finalize();
-                return;
-            }
-        }
-    } else {
-        debug!("Unable to read first sent stream. It may not be a WebTransport stream");
-        return;
-    }
-
-    trace!("WebTransport response was valid. Sending CONNECT header.");
-
-    buf.clear();
-
-    let Some(bidir) = conn.streams().open(Dir::Bi) else {
-        warn!("Unable to open bidirectional stream to send CONNECT header to server");
-        return;
-    };
-
-    //We do not have to have a real url in this packet, as long as the server recognizes the request url sent.
-    let connect_req = ConnectRequest { url: url::Url::from_str("https://nevy.client").unwrap() };
-    connect_req.encode(&mut buf);
-
-    let Err(e) = conn.send_stream(bidir).write(&buf) else {
-        trace!("Successfully sent CONNECT header to the server.");
-        return;
-    };
-
-    warn!("Received and error while writing the CONNECT request to the server: {}", e);
-}
-
-
-//Provided a endpoint and a unidirectional stream with SETTINGs, will try to negotiate and respond to this request.
-fn exchange_settings_server(conn: &mut quinn_proto::Connection, id: StreamId) {
-    let mut buf = Vec::new();
-
-    // First, read the entire stream
-    if let Ok(mut reader) = conn.recv_stream(id).read(true) {
-        loop {
-            if let Some(chunk) = reader.next(usize::MAX).ok() {
-                // Unwrap the Option<Chunk> to get the Chunk
-                let chunk = chunk.unwrap();
-                buf.extend_from_slice(&chunk.bytes);
-                let mut limit = std::io::Cursor::new(&buf);
-
-                match web_transport_proto::Settings::decode(&mut limit) {
-                    Ok(settings) => {
-                        trace!("Received SETTINGS frame: {:?}", settings);
-                        if settings.supports_webtransport() == 0 {
-                            info!("Peer does not support WebTransport!");
-                        } else {
-                            trace!("Peer supports WebTransport.");
-                        }
-                        let _ = reader.finalize();
-                        break;
-                    }
-                    Err(web_transport_proto::SettingsError::UnexpectedEnd) => continue,
-                    Err(e) => {
-                        warn!("Received an error while decoding WebTransport settings header: {}", e);
-                        let _ = reader.finalize();
-                        return;
-                    }
-                }
-            } else {
-                warn!("Error reading from stream");
-                let _ = reader.finalize();
-                return;
-            }
-        }
-    } else {
-        debug!("Unable to read first sent stream. It may not be a WebTransport stream");
-        return;
-    }
-
-    // Now send the response
-    let mut setting_resp = web_transport_proto::Settings::default();
-    setting_resp.enable_webtransport(1);
-    debug!("Sending SETTINGS frame response: {:?}", setting_resp);
-
-    buf.clear();
-    setting_resp.encode(&mut buf);
-
-    if let Some(resp_stream) = conn.streams().open(quinn_proto::Dir::Uni) {
-        if let Err(e) = conn.send_stream(resp_stream).write(&buf) {
-            warn!("Failed to send SETTINGS response to peer: {}", e);
-        }
-    } else {
-        warn!("Failed to open stream for WebTransport SETTINGS reply.");
-    }
-}
-
-fn exchange_connect_server(conn: &mut quinn_proto::Connection, id: StreamId) {
-    trace!("Client accepted our SETTINGs header, negotiating final CONNECT headers.");
-
-    let mut buf = Vec::new();
-
-    // First, read the entire CONNECT request
-    if let Ok(mut reader) = conn.recv_stream(id).read(true) {
-        loop {
-            if let Some(chunk) = reader.next(usize::MAX).ok() {
-                let chunk = chunk.unwrap();
-                buf.extend_from_slice(&chunk.bytes);
-                let mut limit = std::io::Cursor::new(&buf);
-
-                match ConnectRequest::decode(&mut limit) {
-                    Ok(request) => {
-                        debug!("Received CONNECT request: {:?}", request);
-                        let _ = reader.finalize();
-                        break;
-                    }
-                    Err(web_transport_proto::ConnectError::UnexpectedEnd) => {
-                        trace!("Buffering CONNECT request");
-                        continue;
-                    }
-                    Err(e) => {
-                        error!("Error parsing CONNECT request header: {}", e);
-                        let _ = reader.finalize();
-                        return;
-                    }
-                }
-            } else {
-                warn!("Error reading CONNECT request from stream");
-                let _ = reader.finalize();
-                return;
-            }
-        }
-    } else {
-        warn!("Unable to read CONNECT request from stream");
-        return;
-    }
-
-    // Now send the CONNECT response
-    let resp = ConnectResponse { status: default() };
-    debug!("Sending CONNECT response: {:?}", resp);
-
-    buf.clear();
-    resp.encode(&mut buf);
-
-    let mut write_stream = conn.send_stream(id);
-
-    if let Err(e) = write_stream.write(&buf) {
-        warn!("Failed to write a response to the CONNECT request: {}", e);
-    }
-
 }

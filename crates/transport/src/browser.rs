@@ -51,7 +51,7 @@ pub struct BrowserEndpoint {
 
 impl BrowserEndpoint {
     /// Blocks until the endpoint is successfully connected.
-    fn connect(&mut self, url: String) -> Result<(), WebError> {
+    fn connect(&mut self, url: String) {
         if self.connect_task.is_some() {
             warn!("Attempted to connect to a server while there is already an existing connection!\nDropping in favor of new connection.");
         }
@@ -64,15 +64,11 @@ impl BrowserEndpoint {
             Ok(inner)
         }));
 
-
         Ok(())
     }
 }
 
 
-fn connect_sys() {
-
-}
 
 
 pub struct BrowserEndpointPlugin;

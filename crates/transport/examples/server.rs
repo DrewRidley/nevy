@@ -60,8 +60,7 @@ fn create_endpoint_sys(mut commands: Commands) {
 
     commands.spawn((
         endpoint,
-        BevyEndpoint,
-        WebTransportEndpoint::default()
+        WebTransportEndpoint::default(),
     ));
 }
 
@@ -133,7 +132,8 @@ fn main() {
         .add_plugins(LogPlugin {
             // level: Level::TRACE,
             level: Level::TRACE,
-            ..Default::default()
+            filter: "wgpu=error,naga=warn,quinn_proto::connection=debug,quinn_proto::endpoint=debug".into(),
+            ..default()
         })
         .add_plugins(BevyEndpointPlugin::default())
         .add_plugins(WebTransportEndpointPlugin::default())

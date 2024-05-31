@@ -16,12 +16,11 @@ fn create_endpoint_sys(mut cmds: Commands) {
     let quic_cfg: QuicClientConfig = cfg.try_into().unwrap();
     let cfg = quinn_proto::ClientConfig::new(Arc::new(quic_cfg));
 
-    let connection = endpoint.connect(cfg, "127.0.0.1:443".parse().unwrap(), "dev.drewridley.com").unwrap();
+    endpoint.connect(cfg, "127.0.0.1:443".parse().unwrap(), "dev.drewridley.com").unwrap();
 
     cmds.spawn((
         endpoint,
-        BevyEndpoint,
-        WebTransportEndpoint::default()
+        WebTransportEndpoint::default(),
     ));
 }
 
@@ -30,6 +29,8 @@ fn send_message(
     mut endpoint_q: Query<&mut EndpointState>,
 ) {
     for &Connected { endpoint_entity, connection_id } in connected_r.read() {
+        info!("sending hello world message");
+
         let mut endpoint = endpoint_q.get_mut(endpoint_entity).unwrap();
         let connection = endpoint.get_connection_mut(connection_id).unwrap();
 
@@ -45,7 +46,8 @@ fn main() {
         .add_plugins(LogPlugin {
             // level: Level::TRACE,
             level: Level::TRACE,
-            ..Default::default()
+            filter: "wgpu=error,naga=warn,quinn_proto::connection=debug,quinn_proto::endpoint=debug".into(),
+            ..default()
         })
         .add_plugins(BevyEndpointPlugin::default())
         .add_plugins(WebTransportEndpointPlugin::default())

@@ -4,7 +4,7 @@ use bevy::{prelude::*, utils::hashbrown::HashMap};
 use quinn_proto::{DatagramEvent, EndpointConfig, ServerConfig};
 use quinn_udp::{RecvMeta, UdpSockRef, UdpSocketState};
 
-use crate::{connection::{ConnectionId, ConnectionState}, EndpointEventHandler};
+use crate::{connection::{ConnectionId, ConnectionState}, EndpointEventHandler, NewStreamHandler};
 
 
 
@@ -25,6 +25,7 @@ pub struct EndpointState {
     pub(crate) config: EndpointConfig,
     /// the configuration used by this endpoint when accepting connections, if it is configured as a server
     pub(crate) server_config: Option<ServerConfig>,
+    new_stream_handler: Option<Arc<dyn NewStreamHandler>>,
 }
 
 
@@ -52,14 +53,19 @@ impl EndpointState {
             socket_state,
             config,
             server_config,
+            new_stream_handler: None,
         })
+    }
+
+    pub fn set_new_stream_handler(&mut self, handler: Option<Arc<dyn NewStreamHandler>>) {
+        self.new_stream_handler = handler;
     }
 
     pub fn connect(&mut self, client_cfg: quinn_proto::ClientConfig, addr: SocketAddr, server_name: &str) -> Result<&mut ConnectionState, quinn_proto::ConnectError> {
         let (handle, connection) = self.endpoint.connect(std::time::Instant::now(), client_cfg, addr, server_name)?;
         let connection_id = ConnectionId(handle);
 
-        let connection = ConnectionState::new(connection, connection_id);
+        let connection = ConnectionState::new(connection, connection_id, self.new_stream_handler.clone());
 
         let bevy::utils::hashbrown::hash_map::Entry::Vacant(entry) = self.connections.entry(connection_id) else {
             panic!("Attempted to connect to a peer with same handle as existing one!");
@@ -171,7 +177,7 @@ impl EndpointState {
                             let addr = connection.remote_address();
                             debug!("Accepting connection on endpoint {} with {}", self.local_addr, addr);
 
-                            if let Some(existing_connection) = self.connections.insert(connection_id, ConnectionState::new(connection, connection_id)) {
+                            if let Some(existing_connection) = self.connections.insert(connection_id, ConnectionState::new(connection, connection_id, self.new_stream_handler.clone())) {
                                 error!("A new connection to {} was established on {} using a handle that already existed for connection {}", addr, self.local_addr, existing_connection.remote_address());
                             }
 
