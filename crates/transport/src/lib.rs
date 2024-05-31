@@ -40,7 +40,12 @@ pub mod prelude {}
 
 /// a trait for calling back endpoint events to the relevent implementation
 pub trait EndpointEventHandler {
->>>>>>> 2c18a5d (Fixed some warnings)
+
+#[cfg(target_arch = "wasm32")]
+pub mod prelude {}
+
+/// a trait for calling back endpoint events to the relevent implementation
+pub trait EndpointEventHandler {
     /// a new connection has been established
     fn new_connection(&mut self, connection: &mut ConnectionState);
 
@@ -67,7 +72,6 @@ pub trait EndpointEventHandler {
         reset_error: Option<quinn_proto::VarInt>,
     );
 }
-<<<<<<< HEAD
 
 pub trait NewStreamHandler: Send + Sync {
     /// return false to close the stream and not return the stream id to the application
@@ -75,5 +79,3 @@ pub trait NewStreamHandler: Send + Sync {
         true
     }
 }
-=======
->>>>>>> 2c18a5d (Fixed some warnings)
