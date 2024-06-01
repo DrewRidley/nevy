@@ -64,7 +64,7 @@ impl QuinnEndpoint {
             * quinn_udp::BATCH_SIZE;
 
         recv_buffer.resize(min_buffer_len, 0);
-        let buffer_len = context.recv_buffer.len();
+        let buffer_len = recv_buffer.len();
 
         let mut buffer_chunks = recv_buffer
             .chunks_mut(buffer_len / quinn_udp::BATCH_SIZE)

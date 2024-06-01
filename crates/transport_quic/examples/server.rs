@@ -1,4 +1,6 @@
-use transport_interface::prelude::*;
+use std::{io::Read, sync::Arc, time::Duration};
+
+use transport_interface::*;
 use transport_quic::prelude::*;
 
 fn load_certs() -> rustls::ServerConfig {
@@ -8,8 +10,6 @@ fn load_certs() -> rustls::ServerConfig {
     let chain: Vec<rustls::pki_types::CertificateDer> = rustls_pemfile::certs(&mut chain)
         .collect::<Result<_, _>>()
         .expect("failed to load certs");
-
-    trace!("Loading private key for server.");
     let mut keys = std::fs::File::open("privkey.pem").expect("failed to open key file");
 
     let mut buf = Vec::new();
@@ -18,8 +18,6 @@ fn load_certs() -> rustls::ServerConfig {
     let key = rustls_pemfile::private_key(&mut std::io::Cursor::new(&buf))
         .expect("failed to load private key")
         .expect("missing private key");
-
-    debug!("Loaded certificate files.");
 
     let config = rustls::ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
@@ -49,16 +47,30 @@ fn main() {
 
     server_config.transport = Arc::new(transport_config);
 
-    let endpoint =
-        QuinnEndpoint::new("0.0.0.0:443".parse().unwrap(), None, Some(server_config)).unwrap();
+    let mut endpoint =
+        QuinnEndpoint::new("0.0.0.0:27018".parse().unwrap(), None, Some(server_config)).unwrap();
+
+    let mut context = QuinnContext::default();
+
+    event_loop(EndpointRefMut {
+        endpoint: &mut endpoint,
+        context: &mut context,
+    });
 }
 
-fn event_loop<E: Endpoint>(mut endpoint: E, mut context: E::Context) {
+fn event_loop<E: Endpoint>(mut endpoint: EndpointRefMut<E>) {
     loop {
-        endpoint.update(&mut context);
+        endpoint.update();
 
-        while let Some(event) = endpoint.poll_event(&mut context) {
-            match event {}
+        while let Some(event) = endpoint.poll_event() {
+            match event.event {
+                ConnectionEvent::Connected => {
+                    println!("connection");
+                }
+                ConnectionEvent::Disconnected => {
+                    println!("disconnection");
+                }
+            }
         }
     }
 }

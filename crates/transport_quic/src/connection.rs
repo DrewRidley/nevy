@@ -1,4 +1,3 @@
-use quinn_proto::{ConnectionEvent, Transmit};
 use transport_interface::*;
 
 use crate::QuinnContext;
@@ -22,7 +21,7 @@ impl QuinnConnection {
         }
     }
 
-    pub(crate) fn process_event(&mut self, event: ConnectionEvent) {
+    pub(crate) fn process_event(&mut self, event: quinn_proto::ConnectionEvent) {
         self.connection.handle_event(event);
     }
 
@@ -42,9 +41,10 @@ impl QuinnConnection {
             match app_event {
                 quinn_proto::Event::HandshakeDataReady => (),
                 quinn_proto::Event::Connected => {
-                    context
-                        .events
-                        .push_back((self.connection_id, QuinnConnectionEvent::Connected));
+                    context.events.push_back(EndpointEvent {
+                        connection_id: self.connection_id,
+                        event: ConnectionEvent::Connected,
+                    });
                 }
                 quinn_proto::Event::ConnectionLost { reason } => {}
                 quinn_proto::Event::Stream(s) => {}

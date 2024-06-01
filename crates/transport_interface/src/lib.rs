@@ -41,8 +41,8 @@ pub trait Endpoint {
     /// Closes a connection matching the provided id.
     fn disconnect(
         &mut self,
-        id: ConnectionId<Self>,
         context: &mut Self::Context,
+        id: ConnectionId<Self>,
     ) -> Result<(), ()> {
         if let Some(connection) = self.connection_mut(id, context) {
             connection.disconnect(context);
@@ -207,6 +207,14 @@ impl<'a, E: Endpoint> EndpointRef<'a, E> {
 impl<'a, E: Endpoint> EndpointRefMut<'a, E> {
     pub fn update(&mut self) {
         self.endpoint.update(self.context);
+    }
+
+    pub fn connect(&mut self, info: E::ConnectInfo) -> Option<ConnectionId<E>> {
+        self.endpoint.connect(self.context, info)
+    }
+
+    pub fn disconnect(&mut self, id: ConnectionId<E>) -> Result<(), ()> {
+        self.endpoint.disconnect(self.context, id)
     }
 
     /// Retrieves a [ConnectionRef] associated with the given connection.
