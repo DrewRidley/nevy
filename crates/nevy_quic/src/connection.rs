@@ -1,13 +1,16 @@
+use std::collections::VecDeque;
+
 use transport_interface::*;
 
-use crate::QuinnContext;
+use crate::{endpoint::QuinnEndpoint, quinn_stream::QuinnStreamId};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct QuinnConnectionId(pub(crate) quinn_proto::ConnectionHandle);
 
 pub struct QuinnConnection {
     pub(crate) connection: quinn_proto::Connection,
-    connection_id: QuinnConnectionId,
+    pub(crate) connection_id: QuinnConnectionId,
+    pub(crate) stream_events: VecDeque<StreamEvent<QuinnStreamId>>,
 }
 
 impl QuinnConnection {
@@ -18,6 +21,7 @@ impl QuinnConnection {
         QuinnConnection {
             connection,
             connection_id,
+            stream_events: VecDeque::new(),
         }
     }
 
@@ -25,8 +29,7 @@ impl QuinnConnection {
         self.connection.handle_event(event);
     }
 
-    pub(crate) fn poll_timeouts(&mut self, context: &mut QuinnContext) {
-        let _ = context;
+    pub(crate) fn poll_timeouts(&mut self) {
         let now = std::time::Instant::now();
         while let Some(deadline) = self.connection.poll_timeout() {
             if deadline <= now {
@@ -37,12 +40,12 @@ impl QuinnConnection {
         }
     }
 
-    pub(crate) fn poll_events(&mut self, context: &mut QuinnContext) {
+    pub(crate) fn poll_events(&mut self, events: &mut VecDeque<EndpointEvent<QuinnEndpoint>>) {
         while let Some(app_event) = self.connection.poll() {
             match app_event {
                 quinn_proto::Event::HandshakeDataReady => (),
                 quinn_proto::Event::Connected => {
-                    context.events.push_back(EndpointEvent {
+                    events.push_back(EndpointEvent {
                         connection_id: self.connection_id,
                         event: ConnectionEvent::Connected,
                     });
@@ -54,84 +57,38 @@ impl QuinnConnection {
             }
         }
     }
-}
 
-impl Connection for QuinnConnection {
-    type Context<'c> = &'c mut QuinnContext;
+    pub(crate) fn accept_streams(&mut self) {
+        while let Some(stream_id) = self.connection.streams().accept(quinn_proto::Dir::Uni) {
+            let stream_id = QuinnStreamId(stream_id);
 
-    type Id = QuinnConnectionId;
+            self.stream_events
+                .push_back(StreamEvent::NewRecvStream(stream_id));
+        }
 
-    fn disconnect<'c>(&mut self, context: &mut Self::Context<'c>) {
-        todo!()
-    }
+        while let Some(stream_id) = self.connection.streams().accept(quinn_proto::Dir::Bi) {
+            let stream_id = QuinnStreamId(stream_id);
 
-    fn send_stream<S>(&self, stream_id: S) -> Option<&S::Stream>
-    where
-        S: StreamId,
-        S::Stream: SendStream,
-    {
-        todo!()
-    }
-
-    fn send_stream_mut<'c, S>(
-        &mut self,
-        stream_id: S,
-        context: &mut Self::Context<'c>,
-    ) -> Option<&mut S::Stream>
-    where
-        S: StreamId,
-        S::Stream: SendStream,
-    {
-        todo!()
-    }
-
-    fn recv_stream<S>(&self, stream_id: S) -> Option<&S::Stream>
-    where
-        S: StreamId,
-        S::Stream: RecvStream,
-    {
-        todo!()
-    }
-
-    fn recv_stream_mut<'c, S>(
-        &mut self,
-        stream_id: S,
-        context: &mut Self::Context<'c>,
-    ) -> Option<&mut S::Stream>
-    where
-        S: StreamId,
-        S::Stream: RecvStream,
-    {
-        todo!()
-    }
-
-    fn poll_stream_event<'c, S>(
-        &mut self,
-        context: &mut Self::Context<'c>,
-    ) -> Option<StreamEvent<S>>
-    where
-        S: StreamId,
-    {
-        todo!()
+            self.stream_events
+                .push_back(StreamEvent::NewRecvStream(stream_id));
+            self.stream_events
+                .push_back(StreamEvent::NewSendStream(stream_id));
+        }
     }
 }
 
-struct QuinnStreamId(quinn_proto::StreamId);
+impl<'c> ConnectionMut<'c> for &'c mut QuinnConnection {
+    type NonMut = &'c QuinnConnection;
 
-struct QuinnSendStream {}
+    fn as_ref(&'c self) -> Self::NonMut {
+        self
+    }
 
-struct QuinnRecvStream {}
-
-impl StreamId for QuinnStreamId {
-    type Stream = QuinnSendStream;
+    fn disconnect(&mut self) {
+        todo!("disconnection")
+    }
 }
 
-impl StreamId for QuinnStreamId {
-    type Stream = QuinnRecvStream;
-}
-
-struct QuinnDatagram;
-
-impl StreamId for QuinnDatagram {
-    type Stream = QuinnDatagram;
+impl<'c> ConnectionRef<'c> for &'c QuinnConnection {
+    type Mut = &'c mut QuinnConnection;
 }

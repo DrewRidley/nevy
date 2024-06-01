@@ -1,24 +1,7 @@
 
-[package]
-name = "nevy"
-version = "0.0.1-dev"
-edition = "2021"
-categories = ["network-programming", "game-development"]
-description = "Simple, expressive networking for your bevy games"
-keywords = ["netcode", "networking", "bevy"]
-license = "MIT OR Apache-2.0"
-readme = "README.md"
-repository = "https://github.com/DrewRidley/nevy"
-documentation = "https://docs.rs/nevy"
-rust-version = "1.77"
-
-[dependencies]
-bevy.workspace = true
-smallvec = "1.13.2"
-url = "2.5.0"
-
 [workspace]
 members = ["crates/*"]
+resolver = "2"
 
 [workspace.dependencies]
 bevy = { version = "0.13", default-features = false }

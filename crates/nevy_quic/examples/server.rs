@@ -1,4 +1,4 @@
-use std::{io::Read, sync::Arc, time::Duration};
+use std::{collections::HashMap, io::Read, sync::Arc, time::Duration};
 
 use nevy_quic::prelude::*;
 use transport_interface::*;
@@ -50,25 +50,52 @@ fn main() {
     let mut endpoint =
         QuinnEndpoint::new("0.0.0.0:27018".parse().unwrap(), None, Some(server_config)).unwrap();
 
-    let mut context = QuinnContext::default();
+    let mut connections = HashMap::new();
 
-    event_loop(EndpointRefMut {
-        endpoint: &mut endpoint,
-        context: &mut context,
-    });
-}
-
-fn event_loop<E: Endpoint>(mut endpoint: EndpointRefMut<E>) {
     loop {
         endpoint.update();
 
-        while let Some(event) = endpoint.poll_event() {
-            match event.event {
+        while let Some(EndpointEvent {
+            connection_id,
+            event,
+        }) = endpoint.poll_event()
+        {
+            match event {
                 ConnectionEvent::Connected => {
                     println!("connection");
+                    connections.insert(connection_id, HashMap::new());
                 }
                 ConnectionEvent::Disconnected => {
                     println!("disconnection");
+                    connections.remove(&connection_id);
+                }
+            }
+        }
+
+        for (&connection_id, streams) in connections.iter_mut() {
+            let mut connection = endpoint.connection_mut(connection_id).unwrap();
+
+            while let Some(event) = connection.poll_stream_events::<QuinnStreamId>() {
+                match event {
+                    StreamEvent::NewRecvStream(stream_id) => {
+                        streams.insert(stream_id, Vec::<u8>::new());
+                    }
+                    StreamEvent::ClosedRecvStream(stream_id) => {
+                        let stream = streams.remove(&stream_id).unwrap();
+
+                        println!("stream closed, message {:?}", stream);
+                    }
+                    _ => (),
+                }
+            }
+
+            for (&stream_id, stream) in streams.iter_mut() {
+                if let Ok(bytes) = connection
+                    .recv_stream_mut(stream_id)
+                    .unwrap()
+                    .recv(usize::MAX)
+                {
+                    stream.extend(bytes.as_ref());
                 }
             }
         }
