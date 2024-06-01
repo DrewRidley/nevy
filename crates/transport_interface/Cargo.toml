@@ -1,0 +1,42 @@
+[package]
+name = "transport_interface"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+# bevy.workspace = true
+# bytes = "1.6.0"
+# quinn-proto = { version = "0.11", features = ["rustls"] }
+# quinn-udp = "0.5"
+# # Required for WebTransport types.
+# web-transport-proto = { git = "https://github.com/kixelated/web-transport-rs.git", rev = "85e3c0e" }
+# url = "2.5.0"
+
+# # Features required for browser/wasm
+# bevy_async_task = { version = "*", optional = true }
+# wasm-bindgen = { version =  "0.2", optional = true }
+# wasm-bindgen-futures = { version = "0.4", optional = true }
+# js-sys = { version = "0.3.69", optional = true }
+# web-sys = { version = "0.3.69", optional = true, features = [
+#     "ReadableStream",
+#     "ReadableStreamDefaultReader",
+#     "ReadableStreamReadResult",
+#     "WebTransport",
+#     "WebTransportBidirectionalStream",
+#     "WebTransportCloseInfo",
+#     "WebTransportSendStream",
+#     "WebTransportReceiveStream",
+#     "WebTransportDatagramDuplexStream",
+#     "WritableStream",
+#     "WritableStreamDefaultWriter",
+# ] }
+
+
+# [dev-dependencies]
+# rustls = { version = "0.23.5", default-features = false, features = ["std"] }
+# rustls-pemfile = "2.1.2"
+# rustls-platform-verifier = "0.3.1"
+
+# [features]
+# browser = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys", "bevy_async_task"]
+# default = ["browser"]
