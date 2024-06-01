@@ -738,6 +738,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "nevy_quic"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "log",
+ "quinn-proto",
+ "quinn-udp",
+ "rustls",
+ "rustls-pemfile",
+ "rustls-platform-verifier",
+ "transport_interface",
+]
+
+[[package]]
 name = "nonmax"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
