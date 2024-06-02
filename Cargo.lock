@@ -799,6 +799,14 @@ dependencies = [
 [[package]]
 name = "nevy_wasm"
 version = "0.1.0"
+dependencies = [
+ "bytes",
+ "js-sys",
+ "transport_interface",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
 
 [[package]]
 name = "nevy_web_transport"
