@@ -9,7 +9,11 @@ pub trait Endpoint {
     where
         Self: 'c;
 
-    type ConnectionId;
+    /// the connection id type
+    ///
+    /// this is required to also be hashable and cheap to copy
+    /// so that it can be used reasonably in generic contexts
+    type ConnectionId: std::hash::Hash + Eq + Copy;
 
     type ConnectInfo;
 
@@ -109,20 +113,17 @@ pub trait ConnectionRef<'c> {
     ) -> Option<<S::SendMut as SendStreamMut<'s>>::NonMut>
     where
         S: StreamId<'s, 'c, Self::Mut>,
-        Self: Sized,
     {
         stream_id.get_send(self)
     }
 
     /// get a send recv with type `S`
-    fn recv_stream<'s, S, C>(
+    fn recv_stream<'s, S>(
         &'s self,
         stream_id: S,
     ) -> Option<<S::RecvMut as RecvStreamMut<'s>>::NonMut>
     where
-        C: ConnectionMut<'c, NonMut = Self>,
-        S: StreamId<'s, 'c, C>,
-        Self: Sized,
+        S: StreamId<'s, 'c, Self::Mut>,
     {
         stream_id.get_recv(self)
     }
