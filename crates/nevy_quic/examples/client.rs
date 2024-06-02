@@ -16,7 +16,7 @@ fn main() {
     let quic_cfg: QuicClientConfig = cfg.try_into().unwrap();
     let cfg = quinn_proto::ClientConfig::new(Arc::new(quic_cfg));
 
-    let connection_id = endpoint
+    endpoint
         .connect((
             cfg,
             "127.0.0.1:27018".parse().unwrap(),

@@ -1,6 +1,5 @@
 use std::{collections::HashMap, io::Read, sync::Arc, time::Duration};
 
-use nevy_quic::prelude::*;
 use nevy_web_transport::{endpoint::WebTransportEndpoint, streams::WebTransportStreamId};
 use transport_interface::*;
 

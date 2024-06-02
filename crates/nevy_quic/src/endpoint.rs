@@ -268,20 +268,23 @@ impl Endpoint for QuinnEndpoint {
     }
 
     // Retrieve a reference to a particular [QuinnConnection].
-    fn connection<'a>(
-        &'a self,
+    fn connection<'c>(
+        &'c self,
         id: Self::ConnectionId,
-    ) -> Option<<Self::Connection<'a> as ConnectionMut>::NonMut> {
+    ) -> Option<<Self::Connection<'c> as ConnectionMut>::NonMut<'c>> {
         self.connections.get(&id)
     }
 
     // Returns a mutable reference to a particular [QuinnConnection].
-    fn connection_mut<'a>(&'a mut self, id: Self::ConnectionId) -> Option<Self::Connection<'a>> {
+    fn connection_mut<'c>(&'c mut self, id: Self::ConnectionId) -> Option<Self::Connection<'c>> {
         self.connections.get_mut(&id)
     }
 
     /// Connect to a peer, specified by [Self::ConnectInfo].
-    fn connect(&mut self, info: Self::ConnectInfo) -> Option<Self::ConnectionId> {
+    fn connect<'c>(
+        &'c mut self,
+        info: Self::ConnectInfo,
+    ) -> Option<(Self::ConnectionId, Self::Connection<'c>)> {
         let (handle, connection) = self
             .endpoint
             .connect(std::time::Instant::now(), info.0, info.1, info.2.as_str())
@@ -289,17 +292,15 @@ impl Endpoint for QuinnEndpoint {
 
         let connection_id = QuinnConnectionId(handle);
 
-        assert!(
-            self.connections
-                .insert(
-                    connection_id,
-                    QuinnConnection::new(connection, connection_id)
-                )
-                .is_none(),
-            "Connection handle should not be a duplicate"
-        );
+        let std::collections::hash_map::Entry::Vacant(entry) =
+            self.connections.entry(connection_id)
+        else {
+            panic!("Connection handle should not be a duplicate");
+        };
 
-        Some(connection_id)
+        let connection = entry.insert(QuinnConnection::new(connection, connection_id));
+
+        Some((connection_id, connection))
     }
 
     // Poll the internal events, yielding the oldest one.

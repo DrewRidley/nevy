@@ -3,7 +3,7 @@ use nevy_quic::prelude::*;
 use transport_interface::*;
 use web_transport_proto::Frame;
 
-use crate::connection::WebTransportConnectionMut;
+use crate::connection::{WebTransportConnectionMut, WebTransportConnectionRef};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct WebTransportStreamId(pub(crate) QuinnStreamId);
@@ -33,13 +33,15 @@ pub struct WebTransportRecvStreamMut<'s> {
 pub struct WebTransportRecvStreamRef;
 
 impl<'s> SendStreamMut<'s> for WebTransportSendStreamMut<'s> {
-    type NonMut = WebTransportSendStreamRef;
+    type NonMut<'b> = WebTransportSendStreamRef
+    where
+        Self: 'b;
 
     type SendError = QuinnSendError;
 
     type CloseDescription = Option<quinn_proto::VarInt>;
 
-    fn as_ref(&self) -> Self::NonMut {
+    fn as_ref<'b>(&'b self) -> Self::NonMut<'b> {
         todo!()
     }
 
@@ -65,13 +67,15 @@ impl<'s> SendStreamMut<'s> for WebTransportSendStreamMut<'s> {
 impl<'s> SendStreamRef<'s> for WebTransportSendStreamRef {}
 
 impl<'s> RecvStreamMut<'s> for WebTransportRecvStreamMut<'s> {
-    type NonMut = WebTransportRecvStreamRef;
+    type NonMut<'b> = WebTransportRecvStreamRef
+    where
+        Self: 'b;
 
     type ReadError = QuinnReadError;
 
     type CloseDescription = quinn_proto::VarInt;
 
-    fn as_ref(&self) -> Self::NonMut {
+    fn as_ref<'b>(&'b self) -> Self::NonMut<'b> {
         todo!()
     }
 
@@ -101,10 +105,14 @@ impl<'s> RecvStreamMut<'s> for WebTransportRecvStreamMut<'s> {
 
 impl<'s> RecvStreamRef<'s> for WebTransportRecvStreamRef {}
 
-impl<'s, 'c: 's> StreamId<'s, 'c, WebTransportConnectionMut<'c>> for WebTransportStreamId {
-    type SendMut = WebTransportSendStreamMut<'s>;
+impl<'c> StreamId<'c, WebTransportConnectionMut<'c>> for WebTransportStreamId {
+    type SendMut<'s> = WebTransportSendStreamMut<'s>
+    where
+        Self: 's;
 
-    type RecvMut = WebTransportRecvStreamMut<'s>;
+    type RecvMut<'s> = WebTransportRecvStreamMut<'s>
+    where
+        Self: 's;
 
     type OpenDescription = quinn_proto::Dir;
 
@@ -156,49 +164,37 @@ impl<'s, 'c: 's> StreamId<'s, 'c, WebTransportConnectionMut<'c>> for WebTranspor
         Some(stream_id)
     }
 
-    fn get_send_mut(
+    fn get_send_mut<'s>(
         self,
         connection: &'s mut WebTransportConnectionMut<'c>,
-    ) -> Option<Self::SendMut>
-    where
-        'c: 's,
-    {
+    ) -> Option<Self::SendMut<'s>> {
         Some(WebTransportSendStreamMut {
             state: connection.web_transport.send_streams.get_mut(&self)?,
             stream: connection.quinn.send_stream_mut(self.0)?,
         })
     }
 
-    fn get_recv_mut(
+    fn get_recv_mut<'s>(
         self,
         connection: &'s mut WebTransportConnectionMut<'c>,
-    ) -> Option<Self::RecvMut>
-    where
-        'c: 's,
-    {
+    ) -> Option<Self::RecvMut<'s>> {
         Some(WebTransportRecvStreamMut {
             state: connection.web_transport.recv_streams.get_mut(&self)?,
             stream: connection.quinn.recv_stream_mut(self.0)?,
         })
     }
 
-    fn get_send(
+    fn get_send<'s>(
         self,
-        _connection: &'s <WebTransportConnectionMut<'s> as ConnectionMut<'s>>::NonMut,
-    ) -> Option<<Self::SendMut as SendStreamMut<'s>>::NonMut>
-    where
-        'c: 's,
-    {
+        _connection: &'s WebTransportConnectionRef<'c>,
+    ) -> Option<<Self::SendMut<'s> as SendStreamMut<'s>>::NonMut<'s>> {
         Some(WebTransportSendStreamRef)
     }
 
-    fn get_recv(
+    fn get_recv<'s>(
         self,
-        _connection: &'s <WebTransportConnectionMut<'s> as ConnectionMut<'s>>::NonMut,
-    ) -> Option<<Self::RecvMut as RecvStreamMut<'s>>::NonMut>
-    where
-        'c: 's,
-    {
+        _connection: &'s WebTransportConnectionRef<'c>,
+    ) -> Option<<Self::RecvMut<'s> as RecvStreamMut<'s>>::NonMut<'s>> {
         Some(WebTransportRecvStreamRef)
     }
 

@@ -6,3 +6,9 @@ edition = "2021"
 [dependencies]
 transport_interface.path = "../transport_interface"
 bevy.workspace = true
+
+[dev-dependencies]
+rustls = { version = "0.23.5", default-features = false, features = ["std"] }
+rustls-pemfile = "2.1.2"
+rustls-platform-verifier = "0.3.1"
+nevy_quic.path = "../nevy_quic"

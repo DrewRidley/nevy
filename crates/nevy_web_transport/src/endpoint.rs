@@ -76,17 +76,17 @@ impl Endpoint for WebTransportEndpoint {
         }
     }
 
-    fn connection<'a>(
-        &'a self,
+    fn connection<'c>(
+        &'c self,
         id: Self::ConnectionId,
-    ) -> Option<<Self::Connection<'a> as transport_interface::ConnectionMut>::NonMut> {
+    ) -> Option<<Self::Connection<'c> as transport_interface::ConnectionMut>::NonMut<'c>> {
         Some(WebTransportConnectionRef {
             quinn: self.quinn.connection(id)?,
             web_transport: self.connections.get(&id)?,
         })
     }
 
-    fn connection_mut<'a>(&'a mut self, id: Self::ConnectionId) -> Option<Self::Connection<'a>> {
+    fn connection_mut<'c>(&'c mut self, id: Self::ConnectionId) -> Option<Self::Connection<'c>> {
         Some(WebTransportConnectionMut {
             quinn: self.quinn.connection_mut(id)?,
             web_transport: self.connections.get_mut(&id)?,
@@ -95,15 +95,29 @@ impl Endpoint for WebTransportEndpoint {
         })
     }
 
-    fn connect(&mut self, info: Self::ConnectInfo) -> Option<Self::ConnectionId> {
-        let connection_id = self.quinn.connect(info)?;
-        assert!(
-            self.connections
-                .insert(connection_id, WebTransportConnection::new())
-                .is_none(),
-            "Should not get duplicate connection id"
-        );
-        Some(connection_id)
+    fn connect<'c>(
+        &'c mut self,
+        info: Self::ConnectInfo,
+    ) -> Option<(Self::ConnectionId, Self::Connection<'c>)> {
+        let (connection_id, quinn) = self.quinn.connect(info)?;
+
+        let std::collections::hash_map::Entry::Vacant(entry) =
+            self.connections.entry(connection_id)
+        else {
+            panic!("Connection handle should not be a duplicate");
+        };
+
+        let web_transport = entry.insert(WebTransportConnection::new());
+
+        Some((
+            connection_id,
+            WebTransportConnectionMut {
+                quinn,
+                web_transport,
+                events: &mut self.events,
+                connection_id,
+            },
+        ))
     }
 
     fn poll_event(&mut self) -> Option<transport_interface::EndpointEvent<Self>>

@@ -362,9 +362,11 @@ impl<'c> WebTransportConnectionMut<'c> {
 }
 
 impl<'c> ConnectionMut<'c> for WebTransportConnectionMut<'c> {
-    type NonMut = WebTransportConnectionRef<'c>;
+    type NonMut<'b> = WebTransportConnectionRef<'b>
+    where
+        Self: 'b;
 
-    fn as_ref(&'c self) -> Self::NonMut {
+    fn as_ref<'b>(&'b self) -> Self::NonMut<'b> {
         WebTransportConnectionRef {
             quinn: self.quinn,
             web_transport: self.web_transport,
@@ -377,8 +379,6 @@ impl<'c> ConnectionMut<'c> for WebTransportConnectionMut<'c> {
 }
 
 impl<'c> ConnectionRef<'c> for WebTransportConnectionRef<'c> {
-    type Mut = WebTransportConnectionMut<'c>;
-
     fn peer_addr(&self) -> std::net::SocketAddr {
         self.quinn.peer_addr()
     }

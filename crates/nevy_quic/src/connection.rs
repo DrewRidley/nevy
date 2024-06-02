@@ -91,9 +91,9 @@ impl QuinnConnection {
 }
 
 impl<'c> ConnectionMut<'c> for &'c mut QuinnConnection {
-    type NonMut = &'c QuinnConnection;
+    type NonMut<'b> = &'b QuinnConnection where Self: 'b;
 
-    fn as_ref(&'c self) -> Self::NonMut {
+    fn as_ref<'b>(&'b self) -> Self::NonMut<'b> {
         self
     }
 
@@ -103,8 +103,6 @@ impl<'c> ConnectionMut<'c> for &'c mut QuinnConnection {
 }
 
 impl<'c> ConnectionRef<'c> for &'c QuinnConnection {
-    type Mut = &'c mut QuinnConnection;
-
     fn peer_addr(&self) -> std::net::SocketAddr {
         self.connection.remote_address()
     }
