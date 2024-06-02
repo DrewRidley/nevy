@@ -103,7 +103,9 @@ impl<'c> ConnectionMut<'c> for &'c mut QuinnConnection {
 }
 
 impl<'c> ConnectionRef<'c> for &'c QuinnConnection {
-    fn peer_addr(&self) -> std::net::SocketAddr {
+    type ConnectionStats = std::net::SocketAddr;
+
+    fn get_stats(&self) -> std::net::SocketAddr {
         self.connection.remote_address()
     }
 }

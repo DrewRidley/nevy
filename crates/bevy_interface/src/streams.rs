@@ -155,7 +155,7 @@ where
     E::ConnectionId: Send + Sync,
 {
     endpoint_q: Query<'w, 's, &'static mut BevyEndpoint<E>>,
-    connection_q: Query<'w, 's, &'static BevyConnection<E>>,
+    connection_q: Query<'w, 's, (Entity, &'static Parent, &'static BevyConnection<E>)>,
 }
 
 impl<'w, 's, E> Streams<'w, 's, E>
@@ -163,4 +163,9 @@ where
     E: Endpoint + Send + Sync + 'static,
     E::ConnectionId: Send + Sync,
 {
+    pub fn open<S>(&mut self, connection_entity: Entity, description: S::OpenDescription)
+    where
+        S: for<'c> StreamId<Connection<'c> = E::Connection<'c>> + Send + Sync + 'static,
+    {
+    }
 }

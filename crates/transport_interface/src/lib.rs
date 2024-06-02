@@ -64,8 +64,8 @@ pub trait ConnectionMut<'c> {
     /// disconnect the client
     fn disconnect(&mut self);
 
-    fn peer_addr(&self) -> std::net::SocketAddr {
-        self.as_ref().peer_addr()
+    fn get_stats<'b>(&'b self) -> <Self::NonMut<'b> as ConnectionRef<'b>>::ConnectionStats {
+        self.as_ref().get_stats()
     }
 
     /// opens a stream for stream id type `S`
@@ -111,7 +111,9 @@ pub trait ConnectionMut<'c> {
 
 /// contains all the operations that can be made with a reference to connection state with a lifetime of `'c`
 pub trait ConnectionRef<'c> {
-    fn peer_addr(&self) -> std::net::SocketAddr;
+    type ConnectionStats: std::fmt::Debug;
+
+    fn get_stats(&self) -> Self::ConnectionStats;
 
     /// get a send stream with type `S`
     fn send_stream<'s, S, C>(

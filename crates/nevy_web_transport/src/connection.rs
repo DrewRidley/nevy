@@ -379,7 +379,9 @@ impl<'c> ConnectionMut<'c> for WebTransportConnectionMut<'c> {
 }
 
 impl<'c> ConnectionRef<'c> for WebTransportConnectionRef<'c> {
-    fn peer_addr(&self) -> std::net::SocketAddr {
+    type ConnectionStats = std::net::SocketAddr;
+
+    fn get_stats(&self) -> std::net::SocketAddr {
         self.quinn.peer_addr()
     }
 }
