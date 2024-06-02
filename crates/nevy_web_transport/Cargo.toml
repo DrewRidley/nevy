@@ -1,12 +1,13 @@
 [package]
-name = "transport_quic"
+name = "nevy_web_transport"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 transport_interface.path = "../transport_interface"
+nevy_quic.path = "../nevy_quic"
 quinn-proto = { version = "0.11", features = ["rustls"] }
-quinn-udp = "0.5"
+web-transport-proto = { git = "https://github.com/kixelated/web-transport-rs.git", rev = "85e3c0e" }
 bytes = "1.6.0"
 log = "0.4.21"
 
@@ -14,3 +15,4 @@ log = "0.4.21"
 rustls = { version = "0.23.5", default-features = false, features = ["std"] }
 rustls-pemfile = "2.1.2"
 rustls-platform-verifier = "0.3.1"
+simple_logger = "*"

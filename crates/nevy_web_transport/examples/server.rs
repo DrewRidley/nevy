@@ -1,7 +1,8 @@
-use std::{io::Read, sync::Arc, time::Duration};
+use std::{collections::HashMap, io::Read, sync::Arc, time::Duration};
 
+use nevy_quic::prelude::*;
+use nevy_web_transport::{endpoint::WebTransportEndpoint, streams::WebTransportStreamId};
 use transport_interface::*;
-use transport_quic::prelude::*;
 
 fn load_certs() -> rustls::ServerConfig {
     let chain = std::fs::File::open("fullchain.pem").expect("failed to open cert file");
@@ -32,6 +33,8 @@ fn load_certs() -> rustls::ServerConfig {
 }
 
 fn main() {
+    simple_logger::SimpleLogger::new().env().init().unwrap();
+
     let mut config = load_certs();
 
     config.max_early_data_size = u32::MAX;
@@ -48,27 +51,59 @@ fn main() {
     server_config.transport = Arc::new(transport_config);
 
     let mut endpoint =
-        QuinnEndpoint::new("0.0.0.0:27018".parse().unwrap(), None, Some(server_config)).unwrap();
+        WebTransportEndpoint::new("0.0.0.0:443".parse().unwrap(), None, Some(server_config))
+            .unwrap();
 
-    let mut context = QuinnContext::default();
+    let mut connections = HashMap::new();
 
-    event_loop(EndpointRefMut {
-        endpoint: &mut endpoint,
-        context: &mut context,
-    });
-}
-
-fn event_loop<E: Endpoint>(mut endpoint: EndpointRefMut<E>) {
     loop {
         endpoint.update();
 
-        while let Some(event) = endpoint.poll_event() {
-            match event.event {
+        while let Some(EndpointEvent {
+            connection_id,
+            event,
+        }) = endpoint.poll_event()
+        {
+            match event {
                 ConnectionEvent::Connected => {
                     println!("connection");
+                    connections.insert(connection_id, HashMap::new());
                 }
                 ConnectionEvent::Disconnected => {
                     println!("disconnection");
+                    connections.remove(&connection_id);
+                }
+            }
+        }
+
+        for (&connection_id, streams) in connections.iter_mut() {
+            let mut connection = endpoint.connection_mut(connection_id).unwrap();
+
+            while let Some(StreamEvent {
+                stream_id,
+                event_type,
+                ..
+            }) = connection.poll_stream_events::<WebTransportStreamId>()
+            {
+                match event_type {
+                    StreamEventType::NewRecvStream => {
+                        streams.insert(stream_id, Vec::<u8>::new());
+                    }
+                    StreamEventType::ClosedRecvStream => {
+                        let stream = streams.remove(&stream_id).unwrap();
+                        println!("stream closed, message {:?}", stream);
+                    }
+                    _ => (),
+                }
+            }
+
+            for (&stream_id, stream) in streams.iter_mut() {
+                if let Ok(bytes) = connection
+                    .recv_stream_mut(stream_id)
+                    .unwrap()
+                    .recv(usize::MAX)
+                {
+                    stream.extend(bytes.as_ref());
                 }
             }
         }

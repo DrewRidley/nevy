@@ -1,11 +1,9 @@
-use crate::{connection::*, QuinnContext};
-use log::{debug, error, trace, warn};
-use quinn_proto::{
-    ConnectionEvent, ConnectionHandle, DatagramEvent, EndpointConfig, Incoming, ServerConfig,
-};
+use crate::connection::*;
+use log::*;
+use quinn_proto::{ConnectionEvent, DatagramEvent, Incoming};
 use quinn_udp::{UdpSockRef, UdpSocketState};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     io::IoSliceMut,
     net::{SocketAddr, UdpSocket},
     sync::Arc,
@@ -15,7 +13,7 @@ use transport_interface::*;
 /// A transport endpoint facilitated using quinn_proto through a low-level polling methodology.
 ///
 /// Does not use async runtimes and is primarily built for the use in the bevy game engine.
-/// To facilitate connections with a browser or other WebTransport peer, use the 'transport_wt' crate.
+/// To facilitate connections with a browser or other WebTransport peer, use the 'nevy_web_transport' crate.
 pub struct QuinnEndpoint {
     endpoint: quinn_proto::Endpoint,
     socket: UdpSocket,
@@ -24,13 +22,20 @@ pub struct QuinnEndpoint {
     connections: HashMap<QuinnConnectionId, QuinnConnection>,
     config: quinn_proto::EndpointConfig,
     server_config: Option<quinn_proto::ServerConfig>,
+    events: VecDeque<EndpointEvent<QuinnEndpoint>>,
+    recv_buffer: Vec<u8>,
+    send_buffer: Vec<u8>,
 }
 
 impl QuinnEndpoint {
+    /// Creates a new endpoint, facilitated through Quinn.
+    ///
+    /// Requires a bind_addr (consider '0.0.0.0:0' for clients).
+    /// 'config' or 'server_config' can be [None] but never both, since an endpoint must behave as a client, server or both.
     pub fn new(
         bind_addr: SocketAddr,
-        config: Option<EndpointConfig>,
-        server_config: Option<ServerConfig>,
+        config: Option<quinn_proto::EndpointConfig>,
+        server_config: Option<quinn_proto::ServerConfig>,
     ) -> std::io::Result<Self> {
         let socket = UdpSocket::bind(bind_addr)?;
         let socket_state = UdpSocketState::new(UdpSockRef::from(&socket))?;
@@ -52,12 +57,15 @@ impl QuinnEndpoint {
             socket_state,
             config,
             server_config,
+            events: VecDeque::new(),
+            recv_buffer: Vec::new(),
+            send_buffer: Vec::new(),
         })
     }
 
-    fn receive_datagrams(&mut self, context: &mut QuinnContext) {
-        let mut recv_buffer = std::mem::take(&mut context.recv_buffer);
-        let mut send_buffer = std::mem::take(&mut context.send_buffer);
+    // Receive UDP datagrams for internal processing.
+    fn receive_datagrams(&mut self) {
+        let mut recv_buffer = std::mem::take(&mut self.recv_buffer);
 
         let min_buffer_len = self.config.get_max_udp_payload_size().min(64 * 1024) as usize
             * self.socket_state.max_gso_segments()
@@ -82,13 +90,7 @@ impl QuinnEndpoint {
                 &mut metas,
             ) {
                 Ok(datagram_count) => {
-                    self.process_packet(
-                        context,
-                        datagram_count,
-                        &buffer_chunks,
-                        &metas,
-                        &mut send_buffer,
-                    );
+                    self.process_packet(datagram_count, &buffer_chunks, &metas);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
                 Err(other) => {
@@ -100,19 +102,17 @@ impl QuinnEndpoint {
             }
         }
 
-        send_buffer.clear();
+        self.send_buffer.clear();
         recv_buffer.clear();
-        context.send_buffer = send_buffer;
-        context.recv_buffer = recv_buffer;
+        self.recv_buffer = recv_buffer;
     }
 
+    // Process a single UDP packet through the endpoint.
     fn process_packet(
         &mut self,
-        context: &mut QuinnContext,
         datagram_count: usize,
         buffer_chunks: &[IoSliceMut; quinn_udp::BATCH_SIZE],
         metas: &[quinn_udp::RecvMeta; quinn_udp::BATCH_SIZE],
-        send_buffer: &mut Vec<u8>,
     ) {
         trace!(
             "Received {datagram_count} UDP datagrams on {}.",
@@ -138,41 +138,23 @@ impl QuinnEndpoint {
                     meta.dst_ip,
                     ecn,
                     data.into(),
-                    send_buffer,
+                    &mut self.send_buffer,
                 ) else {
                     continue;
                 };
 
-                self.process_datagram_event(context, send_buffer, datagram_event);
+                self.process_datagram_event(datagram_event);
             }
         }
     }
 
-    pub fn respond(
-        &mut self,
-        transmit: &quinn_proto::Transmit,
-        response_buffer: &[u8],
-    ) -> std::io::Result<()> {
-        // convert to `quinn_proto` transmit
-        let transmit = udp_transmit(transmit, response_buffer);
-
-        // send if there is kernal buffer space, else drop it
-        self.socket_state
-            .send(UdpSockRef::from(&self.socket), &transmit)
-    }
-
-    fn process_datagram_event(
-        &mut self,
-        context: &mut QuinnContext,
-        send_buffer: &mut Vec<u8>,
-        event: DatagramEvent,
-    ) {
+    // Process an event associated with a datagram.
+    fn process_datagram_event(&mut self, event: DatagramEvent) {
         let transmit = match event {
-            DatagramEvent::NewConnection(incoming) => {
-                self.accept_incoming(context, incoming, send_buffer)
-            }
+            DatagramEvent::NewConnection(incoming) => self.accept_incoming(incoming),
             DatagramEvent::ConnectionEvent(handle, event) => {
-                self.process_connection_event(context, handle, event);
+                let connection_id = QuinnConnectionId(handle);
+                self.process_connection_event(connection_id, event);
                 None
             }
             DatagramEvent::Response(transmit) => Some(transmit),
@@ -180,29 +162,30 @@ impl QuinnEndpoint {
 
         if let Some(transmit) = transmit {
             // the transmit failing is equivelant to dropping due to congestion
-            let _ = self.respond(&transmit, send_buffer);
+            let _ = self.socket_state.send(
+                quinn_udp::UdpSockRef::from(&self.socket),
+                &udp_transmit(&transmit, &self.send_buffer),
+            );
         }
     }
 
-    fn accept_incoming(
-        &mut self,
-        context: &mut QuinnContext,
-        incoming: Incoming,
-        response_buffer: &mut Vec<u8>,
-    ) -> Option<quinn_proto::Transmit> {
+    // Accept an incoming connection and optionally return data to transmit to callee.
+    fn accept_incoming(&mut self, incoming: Incoming) -> Option<quinn_proto::Transmit> {
         if self.server_config.is_none() {
             warn!("{} attempted to connect to endpoint {} but the endpoint isn't configured as a server", incoming.remote_address(), self.local_addr);
-            return Some(self.endpoint.refuse(incoming, response_buffer));
+            return Some(self.endpoint.refuse(incoming, &mut self.send_buffer));
         }
 
-        if !context.accept_connection(&incoming) {
-            return Some(self.endpoint.refuse(incoming, response_buffer));
+        if false {
+            return Some(self.endpoint.refuse(incoming, &mut self.send_buffer));
         };
 
-        match self
-            .endpoint
-            .accept(incoming, std::time::Instant::now(), response_buffer, None)
-        {
+        match self.endpoint.accept(
+            incoming,
+            std::time::Instant::now(),
+            &mut self.send_buffer,
+            None,
+        ) {
             Err(err) => return err.response,
             Ok((handle, connection)) => {
                 let connection_id = QuinnConnectionId(handle);
@@ -218,13 +201,13 @@ impl QuinnEndpoint {
         }
     }
 
+    // Process an event associated with a connection.
     fn process_connection_event(
         &mut self,
-        context: &mut QuinnContext,
-        handle: ConnectionHandle,
+        connection_id: QuinnConnectionId,
         event: ConnectionEvent,
     ) {
-        let Some(connection) = self.connection_mut(QuinnConnectionId(handle), context) else {
+        let Some(connection) = self.connection_mut(connection_id) else {
             error!(
                 "Endpoint {} returned a connection event about a connection that doesn't) exist",
                 self.local_addr
@@ -235,25 +218,26 @@ impl QuinnEndpoint {
         connection.process_event(event);
     }
 
-    fn update_connections(&mut self, context: &mut QuinnContext) {
+    // Update the internal connections, polling/advancing their state.
+    fn update_connections(&mut self) {
         let max_gso_datagrams = self.socket_state.gro_segments();
 
         for (&connection_id, connection) in self.connections.iter_mut() {
             //Return transmission to endpoint if there is one.
-            context.send_buffer.clear();
+            self.send_buffer.clear();
             if let Some(transmit) = connection.connection.poll_transmit(
                 std::time::Instant::now(),
                 max_gso_datagrams,
-                &mut context.send_buffer,
+                &mut self.send_buffer,
             ) {
                 // the transmit failing is equivelant to dropping due to congestion
                 let _ = self.socket_state.send(
                     quinn_udp::UdpSockRef::from(&self.socket),
-                    &udp_transmit(&transmit, &context.send_buffer),
+                    &udp_transmit(&transmit, &self.send_buffer),
                 );
             }
 
-            connection.poll_timeouts(context);
+            connection.poll_timeouts();
 
             while let Some(endpoint_event) = connection.connection.poll_endpoint_events() {
                 if let Some(conn_event) =
@@ -263,44 +247,41 @@ impl QuinnEndpoint {
                 }
             }
 
-            connection.poll_events(context);
+            connection.poll_events(&mut self.events);
+
+            connection.accept_streams();
         }
     }
 }
 
 impl Endpoint for QuinnEndpoint {
-    type Context = QuinnContext;
+    type Connection<'a> = &'a mut QuinnConnection;
 
-    type Connection = QuinnConnection;
+    type ConnectionId = QuinnConnectionId;
 
     type ConnectInfo = (quinn_proto::ClientConfig, SocketAddr, String);
 
-    fn update(&mut self, context: &mut Self::Context) {
-        self.receive_datagrams(context);
-        self.update_connections(context);
+    // Processes timeouts, received datagrams and other events.
+    fn update(&mut self) {
+        self.receive_datagrams();
+        self.update_connections();
     }
 
-    fn connection(
-        &self,
-        id: ConnectionId<Self>,
-        _context: &Self::Context,
-    ) -> Option<&Self::Connection> {
+    // Retrieve a reference to a particular [QuinnConnection].
+    fn connection<'a>(
+        &'a self,
+        id: Self::ConnectionId,
+    ) -> Option<<Self::Connection<'a> as ConnectionMut>::NonMut> {
         self.connections.get(&id)
     }
 
-    fn connection_mut(
-        &mut self,
-        id: ConnectionId<Self>,
-        _context: &mut Self::Context,
-    ) -> Option<&mut Self::Connection> {
+    // Returns a mutable reference to a particular [QuinnConnection].
+    fn connection_mut<'a>(&'a mut self, id: Self::ConnectionId) -> Option<Self::Connection<'a>> {
         self.connections.get_mut(&id)
     }
 
-    fn connect(
-        &mut self,
-        context: &mut Self::Context,
-        info: Self::ConnectInfo,
-    ) -> Option<ConnectionId<Self>> {
+    /// Connect to a peer, specified by [Self::ConnectInfo].
+    fn connect(&mut self, info: Self::ConnectInfo) -> Option<Self::ConnectionId> {
         let (handle, connection) = self
             .endpoint
             .connect(std::time::Instant::now(), info.0, info.1, info.2.as_str())
@@ -321,8 +302,21 @@ impl Endpoint for QuinnEndpoint {
         Some(connection_id)
     }
 
-    fn poll_event(&mut self, context: &mut Self::Context) -> Option<EndpointEvent<Self>> {
-        context.events.pop_front()
+    // Poll the internal events, yielding the oldest one.
+    fn poll_event(&mut self) -> Option<EndpointEvent<Self>> {
+        self.events.pop_front()
+    }
+
+    // Disconnect a specific connection.
+    //
+    // Returns [Err()] if the connection never existed.
+    fn disconnect(&mut self, id: Self::ConnectionId) -> Result<(), ()> {
+        if let Some(mut connection) = self.connection_mut(id) {
+            connection.disconnect();
+            Ok(())
+        } else {
+            Err(())
+        }
     }
 }
 

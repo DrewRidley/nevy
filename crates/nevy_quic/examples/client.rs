@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use nevy_quic::prelude::*;
 use quinn_proto::crypto::rustls::QuicClientConfig;
 use transport_interface::*;
-use transport_quic::prelude::*;
 
 fn main() {
     let mut endpoint = QuinnEndpoint::new("0.0.0.0:0".parse().unwrap(), None, None).unwrap();
@@ -16,14 +16,7 @@ fn main() {
     let quic_cfg: QuicClientConfig = cfg.try_into().unwrap();
     let cfg = quinn_proto::ClientConfig::new(Arc::new(quic_cfg));
 
-    let mut context = QuinnContext::default();
-
-    let mut endpoint = EndpointRefMut {
-        endpoint: &mut endpoint,
-        context: &mut context,
-    };
-
-    endpoint
+    let connection_id = endpoint
         .connect((
             cfg,
             "127.0.0.1:27018".parse().unwrap(),
@@ -31,17 +24,25 @@ fn main() {
         ))
         .unwrap();
 
-    event_loop(endpoint);
-}
-
-fn event_loop<E: Endpoint>(mut endpoint: EndpointRefMut<E>) {
     loop {
         endpoint.update();
 
-        while let Some(event) = endpoint.poll_event() {
-            match event.event {
+        while let Some(EndpointEvent {
+            connection_id,
+            event,
+        }) = endpoint.poll_event()
+        {
+            match event {
                 ConnectionEvent::Connected => {
                     println!("connection");
+
+                    let mut connection = endpoint.connection_mut(connection_id).unwrap();
+
+                    let stream_id: QuinnStreamId =
+                        connection.open_stream(quinn_proto::Dir::Uni).unwrap();
+                    let mut stream = connection.send_stream_mut(stream_id).unwrap();
+                    stream.send(&[1, 2, 3, 4]).unwrap();
+                    stream.close(None).unwrap();
                 }
                 ConnectionEvent::Disconnected => {
                     println!("disconnection");
