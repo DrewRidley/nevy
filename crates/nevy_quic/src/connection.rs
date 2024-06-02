@@ -62,18 +62,31 @@ impl QuinnConnection {
         while let Some(stream_id) = self.connection.streams().accept(quinn_proto::Dir::Uni) {
             let stream_id = QuinnStreamId(stream_id);
 
-            self.stream_events
-                .push_back(StreamEvent::NewRecvStream(stream_id));
+            self.stream_events.push_back(StreamEvent {
+                stream_id,
+                peer_generated: true,
+                event_type: StreamEventType::NewRecvStream,
+            });
         }
 
         while let Some(stream_id) = self.connection.streams().accept(quinn_proto::Dir::Bi) {
             let stream_id = QuinnStreamId(stream_id);
 
-            self.stream_events
-                .push_back(StreamEvent::NewRecvStream(stream_id));
-            self.stream_events
-                .push_back(StreamEvent::NewSendStream(stream_id));
+            self.stream_events.push_back(StreamEvent {
+                stream_id,
+                peer_generated: true,
+                event_type: StreamEventType::NewRecvStream,
+            });
+            self.stream_events.push_back(StreamEvent {
+                stream_id,
+                peer_generated: true,
+                event_type: StreamEventType::NewSendStream,
+            });
         }
+    }
+
+    pub fn side(&self) -> quinn_proto::Side {
+        self.connection.side()
     }
 }
 
@@ -91,4 +104,8 @@ impl<'c> ConnectionMut<'c> for &'c mut QuinnConnection {
 
 impl<'c> ConnectionRef<'c> for &'c QuinnConnection {
     type Mut = &'c mut QuinnConnection;
+
+    fn peer_addr(&self) -> std::net::SocketAddr {
+        self.connection.remote_address()
+    }
 }

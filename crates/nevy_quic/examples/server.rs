@@ -75,12 +75,17 @@ fn main() {
         for (&connection_id, streams) in connections.iter_mut() {
             let mut connection = endpoint.connection_mut(connection_id).unwrap();
 
-            while let Some(event) = connection.poll_stream_events::<QuinnStreamId>() {
-                match event {
-                    StreamEvent::NewRecvStream(stream_id) => {
+            while let Some(StreamEvent {
+                stream_id,
+                event_type,
+                ..
+            }) = connection.poll_stream_events::<QuinnStreamId>()
+            {
+                match event_type {
+                    StreamEventType::NewRecvStream => {
                         streams.insert(stream_id, Vec::<u8>::new());
                     }
-                    StreamEvent::ClosedRecvStream(stream_id) => {
+                    StreamEventType::ClosedRecvStream => {
                         let stream = streams.remove(&stream_id).unwrap();
 
                         println!("stream closed, message {:?}", stream);

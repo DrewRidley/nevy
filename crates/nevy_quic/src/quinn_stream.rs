@@ -87,14 +87,17 @@ impl<'s, 'c> RecvStreamMut<'s> for QuinnRecvStreamMut<'s> {
             Ok(chunks) => chunks,
             Err(quinn_proto::ReadableError::ClosedStream) => return Err(QuinnReadError::NoStream),
             Err(quinn_proto::ReadableError::IllegalOrderedRead) => {
-                unreachable!("will never read unorered")
+                unreachable!("will never read unordered")
             }
         };
 
         let bytes = match chunks.next(limit) {
             Ok(None) => {
-                self.events
-                    .push_back(StreamEvent::ClosedRecvStream(self.stream_id));
+                self.events.push_back(StreamEvent {
+                    stream_id: self.stream_id,
+                    peer_generated: true,
+                    event_type: StreamEventType::ClosedRecvStream,
+                });
 
                 Err(QuinnReadError::Blocked)
             }

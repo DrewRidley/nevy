@@ -5,9 +5,9 @@
 /// Endpoints must be polled via the [poll] method to progress their internal state.
 pub trait Endpoint {
     /// The type of connection state this endpoint orchestrates.
-    type Connection<'a>: ConnectionMut<'a>
+    type Connection<'c>: ConnectionMut<'c>
     where
-        Self: 'a;
+        Self: 'c;
 
     type ConnectionId;
 
@@ -54,6 +54,10 @@ pub trait ConnectionMut<'c> {
     /// disconnect the client
     fn disconnect(&mut self);
 
+    fn peer_addr(&'c self) -> std::net::SocketAddr {
+        self.as_ref().peer_addr()
+    }
+
     /// opens a stream for stream id type `S`
     fn open_stream<'s, S>(&mut self, description: S::OpenDescription) -> Option<S>
     where
@@ -95,6 +99,8 @@ pub trait ConnectionMut<'c> {
 /// contains all the operations that can be made with a reference to connection state with a lifetime of `'c`
 pub trait ConnectionRef<'c> {
     type Mut: ConnectionMut<'c, NonMut = Self>;
+
+    fn peer_addr(&self) -> std::net::SocketAddr;
 
     /// get a send stream with type `S`
     fn send_stream<'s, S>(
@@ -212,16 +218,24 @@ pub struct EndpointEvent<E: Endpoint> {
     pub event: ConnectionEvent,
 }
 
-/// the tye of [EndpointEvent]
+/// the type of [EndpointEvent]
 pub enum ConnectionEvent {
     Connected,
     Disconnected,
 }
 
 /// events fired by streams
-pub enum StreamEvent<S> {
-    NewSendStream(S),
-    ClosedSendStream(S),
-    NewRecvStream(S),
-    ClosedRecvStream(S),
+pub struct StreamEvent<S> {
+    pub stream_id: S,
+    /// - `false` if the local endpoint generated the event
+    /// - `true` if the peer triggered the event
+    pub peer_generated: bool,
+    pub event_type: StreamEventType,
+}
+
+pub enum StreamEventType {
+    NewSendStream,
+    ClosedSendStream,
+    NewRecvStream,
+    ClosedRecvStream,
 }
