@@ -41,9 +41,7 @@ where
     pub fn connect(&mut self, endpoint_entity: Entity, info: E::ConnectInfo) -> Option<Entity> {
         let mut endpoint = self.endpoint_q.get_mut(endpoint_entity).ok()?;
 
-        let (connection_id, connection) = endpoint.endpoint.connect(info)?;
-        let addr = connection.peer_addr();
-        drop(connection);
+        let (connection_id, _) = endpoint.endpoint.connect(info)?;
 
         let connection_entity = self
             .commands
@@ -52,9 +50,9 @@ where
             .id();
 
         debug!(
-            "an Endpoint<{}> is connecting to {}",
+            "Endpoint<{}> {:?} is making a connection",
             std::any::type_name::<E>(),
-            addr
+            endpoint_entity,
         );
 
         Some(connection_entity)
@@ -83,8 +81,8 @@ where
         let _ = endpoint.endpoint.disconnect(connection.connection_id);
     }
 
-    /// returns the peer address for some connection if it exists
-    pub fn peer_addr(&self, connection_entity: Entity) -> Option<std::net::SocketAddr> {
+    /// returns the stats for some connection if it exists
+    pub fn get_stats<'c>(&'c self, connection_entity: Entity) -> Option<<<E::Connection<'c> as ConnectionMut<'c>>::NonMut<'c> as ConnectionRef<'c>>::ConnectionStats>{
         let Ok((connection_parent, connection)) = self.connection_q.get(connection_entity) else {
             return None;
         };
@@ -105,7 +103,7 @@ where
             endpoint
                 .endpoint
                 .connection(connection.connection_id)?
-                .peer_addr(),
+                .get_stats(),
         )
     }
 }

@@ -155,7 +155,7 @@ where
     E::ConnectionId: Send + Sync,
 {
     endpoint_q: Query<'w, 's, &'static mut BevyEndpoint<E>>,
-    connection_q: Query<'w, 's, (Entity, &'static Parent, &'static BevyConnection<E>)>,
+    connection_q: Query<'w, 's, (&'static Parent, &'static BevyConnection<E>)>,
 }
 
 impl<'w, 's, E> Streams<'w, 's, E>
@@ -163,9 +163,32 @@ where
     E: Endpoint + Send + Sync + 'static,
     E::ConnectionId: Send + Sync,
 {
-    pub fn open<S>(&mut self, connection_entity: Entity, description: S::OpenDescription)
+    pub fn open<S>(
+        &mut self,
+        connection_entity: Entity,
+        description: S::OpenDescription,
+    ) -> Option<S>
     where
         S: for<'c> StreamId<Connection<'c> = E::Connection<'c>> + Send + Sync + 'static,
     {
+        let Ok((connection_parent, connection)) = self.connection_q.get(connection_entity) else {
+            return None;
+        };
+
+        let endpoint_entity = connection_parent.get();
+
+        let Ok(mut endpoint) = self.endpoint_q.get_mut(endpoint_entity) else {
+            error!(
+                "connection {:?}'s parent {:?} could not be queried as an endpoint. ({})",
+                connection_entity,
+                endpoint_entity,
+                std::any::type_name::<E>()
+            );
+            return None;
+        };
+
+        let mut connection = endpoint.endpoint.connection_mut(connection.connection_id)?;
+
+        connection.open_stream(description)
     }
 }
