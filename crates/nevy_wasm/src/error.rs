@@ -1,3 +1,5 @@
+use wasm_bindgen::JsValue;
+
 #[derive(Debug)]
 pub struct WebError {
     value: JsValue,

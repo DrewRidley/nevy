@@ -1,8 +1,13 @@
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    future::IntoFuture,
+    task::{Context, Waker},
+};
 
 use crate::connection::WasmConnection;
 use slotmap::SlotMap;
 use transport_interface::{ConnectionMut, Endpoint, EndpointEvent};
+use wasm_bindgen_futures::JsFuture;
 use web_sys::WebTransport;
 
 slotmap::new_key_type! {
@@ -29,7 +34,11 @@ impl Endpoint for WasmEndpoint {
     type ConnectionId = WasmConnectionId;
     type ConnectInfo = String;
 
-    fn update(&mut self) {}
+    fn update(&mut self) {
+        for (connection_id, connection) in self.connections.iter_mut() {
+            connection.update(connection_id, &mut self.events);
+        }
+    }
 
     fn connection<'c>(
         &'c self,
@@ -46,11 +55,19 @@ impl Endpoint for WasmEndpoint {
         &'c mut self,
         info: Self::ConnectInfo,
     ) -> Option<(Self::ConnectionId, Self::Connection<'c>)> {
+        let wt = WebTransport::new(&info).ok()?;
+        let future = JsFuture::from(wt.ready());
+        let context = Context::from_waker(Waker::noop());
+        let future = Box::pin(future);
+
         let wasm = WasmConnection {
-            inner: WebTransport::new(&info).ok()?,
+            inner: wt,
+            connect_future: Some(future),
         };
 
-        Some(self.connections.insert(wasm), wasm);
+        let connection_id = self.connections.insert(wasm);
+
+        Some((connection_id, self.connection_mut(connection_id).unwrap()))
     }
 
     fn poll_event(&mut self) -> Option<transport_interface::EndpointEvent<Self>>
