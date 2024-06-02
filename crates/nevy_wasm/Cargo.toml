@@ -3,4 +3,26 @@ name = "nevy_wasm"
 version = "0.1.0"
 edition = "2021"
 
+
 [dependencies]
+transport_interface.path = "../transport_interface"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3.69"
+bytes = "1"
+
+[dependencies.web-sys]
+version = "0.3.69"
+features = [
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
+    "ReadableStreamReadResult",
+    "WebTransport",
+    "WebTransportBidirectionalStream",
+    "WebTransportCloseInfo",
+    "WebTransportSendStream",
+    "WebTransportReceiveStream",
+    "WebTransportDatagramDuplexStream",
+    "WritableStream",
+    "WritableStreamDefaultWriter",
+]
