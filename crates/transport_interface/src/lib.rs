@@ -71,7 +71,8 @@ pub trait ConnectionMut<'c> {
     /// opens a stream for stream id type `S`
     fn open_stream<S>(&mut self, description: S::OpenDescription) -> Option<S>
     where
-        S: StreamId<'c, Self>,
+        S: StreamId<Connection<'c> = Self>,
+        S: 'c,
         Self: Sized,
     {
         S::open(self, description)
@@ -80,7 +81,8 @@ pub trait ConnectionMut<'c> {
     /// get a send stream mutably with type `S`
     fn send_stream_mut<'s, S>(&'s mut self, stream_id: S) -> Option<S::SendMut<'s>>
     where
-        S: StreamId<'c, Self>,
+        S: StreamId<Connection<'c> = Self>,
+        S: 'c,
         Self: Sized,
     {
         stream_id.get_send_mut(self)
@@ -89,7 +91,8 @@ pub trait ConnectionMut<'c> {
     /// get a recv stream mutably with type `S`
     fn recv_stream_mut<'s, S>(&'s mut self, stream_id: S) -> Option<S::RecvMut<'s>>
     where
-        S: StreamId<'c, Self>,
+        S: StreamId<Connection<'c> = Self>,
+        S: 'c,
         Self: Sized,
     {
         stream_id.get_recv_mut(self)
@@ -98,8 +101,9 @@ pub trait ConnectionMut<'c> {
     /// polls stream events for stream id type `S`
     fn poll_stream_events<S>(&mut self) -> Option<StreamEvent<S>>
     where
-        S: StreamId<'c, Self>,
-        Self: Sized + 'c,
+        S: StreamId<Connection<'c> = Self>,
+        S: 'c,
+        Self: Sized,
     {
         S::poll_events(self)
     }
@@ -115,8 +119,9 @@ pub trait ConnectionRef<'c> {
         stream_id: S,
     ) -> Option<<S::SendMut<'s> as SendStreamMut<'s>>::NonMut<'s>>
     where
-        S: StreamId<'c, C>,
-        C: ConnectionMut<'c, NonMut<'c> = Self>,
+        S: StreamId<Connection<'s> = C>,
+        C: ConnectionMut<'s, NonMut<'s> = Self>,
+        C: 's,
     {
         stream_id.get_send(self)
     }
@@ -127,19 +132,30 @@ pub trait ConnectionRef<'c> {
         stream_id: S,
     ) -> Option<<S::RecvMut<'s> as RecvStreamMut<'s>>::NonMut<'s>>
     where
-        S: StreamId<'c, C>,
-        C: ConnectionMut<'c, NonMut<'c> = Self>,
+        S: StreamId<Connection<'s> = C>,
+        C: ConnectionMut<'s, NonMut<'s> = Self>,
+        C: 's,
     {
         stream_id.get_recv(self)
     }
 }
 
-/// contains methods to operate on a stream type for mutable and immutable connection references with a lifetime of `'c`
-pub trait StreamId<'c, C: ConnectionMut<'c> + 'c> {
-    /// the type of mutable send stream reference with lifetime `'s` for `C` for this stream id
-    type SendMut<'s>: SendStreamMut<'s>;
-    /// the type of mutable recv stream reference with lifetime `'s` for `C` for this stream id
-    type RecvMut<'s>: RecvStreamMut<'s>;
+/// contains methods to operate on a stream type
+pub trait StreamId {
+    /// the mutable connection reference of this stream id
+    type Connection<'c>: ConnectionMut<'c>
+    where
+        Self: 'c;
+
+    /// the mutable send stream reference of this stream id
+    type SendMut<'s>: SendStreamMut<'s>
+    where
+        Self: 's;
+
+    /// the mutable recv stream reference of this stream id
+    type RecvMut<'s>: RecvStreamMut<'s>
+    where
+        Self: 's;
 
     /// description of a stream when opening
     type OpenDescription;
@@ -147,30 +163,39 @@ pub trait StreamId<'c, C: ConnectionMut<'c> + 'c> {
     /// opens a stream
     ///
     /// should fire an event consistent with the stream id returned
-    fn open(connection: &mut C, description: Self::OpenDescription) -> Option<Self>
+    fn open<'c>(
+        connection: &mut Self::Connection<'c>,
+        description: Self::OpenDescription,
+    ) -> Option<Self>
     where
         Self: Sized;
 
-    /// get a mutable reference to send stream with `'s` from a mutable reference to a connection with `'c`
-    fn get_send_mut<'s>(self, connection: &'s mut C) -> Option<Self::SendMut<'s>>;
-
-    /// get a mutable reference to recv stream with `'s` from a mutable reference to a connection with `'c`
-    fn get_recv_mut<'s>(self, connection: &'s mut C) -> Option<Self::RecvMut<'s>>;
-
-    /// get a reference to send stream with `'s` from a reference to a connection with `'c`
-    fn get_send<'s>(
+    /// get a `'s` mutable reference to a send stream with from a `'c` mutable reference to a connection
+    fn get_send_mut<'c, 's>(
         self,
-        connection: &'s C::NonMut<'c>,
+        connection: &'s mut Self::Connection<'c>,
+    ) -> Option<Self::SendMut<'s>>;
+
+    /// get a `'s` mutable reference to a recv stream with from a `'c` mutable reference to a connection
+    fn get_recv_mut<'c, 's>(
+        self,
+        connection: &'s mut Self::Connection<'c>,
+    ) -> Option<Self::RecvMut<'s>>;
+
+    /// get a `'s` immutable reference to a send stream with from a `'c` immutable reference to a connection
+    fn get_send<'c, 's>(
+        self,
+        connection: &'s <Self::Connection<'c> as ConnectionMut<'c>>::NonMut<'c>,
     ) -> Option<<Self::SendMut<'s> as SendStreamMut<'s>>::NonMut<'s>>;
 
-    /// get a reference to recv stream with `'s` from a reference to a connection with `'c`
-    fn get_recv<'s>(
+    /// get a `'s` immutable reference to a recv stream with from a `'c` immutable reference to a connection
+    fn get_recv<'c, 's>(
         self,
-        connection: &'s C::NonMut<'c>,
+        connection: &'s <Self::Connection<'c> as ConnectionMut<'c>>::NonMut<'c>,
     ) -> Option<<Self::RecvMut<'s> as RecvStreamMut<'s>>::NonMut<'s>>;
 
     /// poll the events for this stream from a mutable reference to a connection
-    fn poll_events(connection: &mut C) -> Option<StreamEvent<Self>>
+    fn poll_events<'c>(connection: &mut Self::Connection<'c>) -> Option<StreamEvent<Self>>
     where
         Self: Sized;
 }
@@ -179,7 +204,6 @@ pub trait StreamId<'c, C: ConnectionMut<'c> + 'c> {
 pub trait SendStreamMut<'s> {
     type NonMut<'b>: SendStreamRef<'b>
     where
-        's: 'b,
         Self: 'b;
 
     type SendError;
@@ -200,7 +224,6 @@ pub trait SendStreamRef<'s> {}
 pub trait RecvStreamMut<'s> {
     type NonMut<'b>: RecvStreamRef<'b>
     where
-        's: 'b,
         Self: 'b;
 
     type ReadError;

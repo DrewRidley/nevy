@@ -16,7 +16,8 @@ fn main() {
 
     app.add_plugins(EndpointPlugin::<QuinnEndpoint>::default());
 
-    app.add_systems(Startup, (spawn_endpoint, apply_deferred, connect));
+    app.add_systems(Startup, spawn_endpoint);
+    app.add_systems(Update, log_events);
 
     app.run()
 }
@@ -75,8 +76,26 @@ fn spawn_endpoint(mut commands: Commands) {
     commands.spawn((ExampleEndpoint, BevyEndpoint::new(endpoint)));
 }
 
-fn connect(endpoint_q: Query<Entity, With<ExampleEndpoint>>, mut connections: Connections) {
-    let endpoint_entity = endpoint_q.single();
+fn log_events(
+    mut connected_r: EventReader<Connected>,
+    mut disconnected_r: EventReader<Disconnected>,
+) {
+    for &Connected {
+        endpoint_entity,
+        connection_entity,
+    } in connected_r.read()
+    {
+        info!("{:?} connected to {:?}", connection_entity, endpoint_entity);
+    }
 
-    connections.connect(endpoint_entity, ());
+    for &Disconnected {
+        endpoint_entity,
+        connection_entity,
+    } in disconnected_r.read()
+    {
+        info!(
+            "{:?} disconnected from {:?}",
+            connection_entity, endpoint_entity
+        );
+    }
 }

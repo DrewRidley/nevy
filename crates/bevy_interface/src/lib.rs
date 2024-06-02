@@ -7,24 +7,18 @@ pub mod connection;
 pub mod endpoint;
 pub mod streams;
 
-use connection::*;
-use endpoint::*;
-
 pub mod prelude {
     pub use crate::connection::BevyConnection;
     pub use crate::endpoint::{BevyEndpoint, Connections};
     pub use crate::{Connected, Disconnected, EndpointPlugin};
 }
 
+/// adds events and update loop for
+/// [BevyEndpoint] and [BevyConnection]
+/// with an endpoint backend `E`
 pub struct EndpointPlugin<E> {
     _p: PhantomData<E>,
     schedule: Interned<dyn ScheduleLabel>,
-}
-
-impl<E> Default for EndpointPlugin<E> {
-    fn default() -> Self {
-        EndpointPlugin::new(PreUpdate)
-    }
 }
 
 impl<E> EndpointPlugin<E> {
@@ -36,6 +30,12 @@ impl<E> EndpointPlugin<E> {
     }
 }
 
+impl<E> Default for EndpointPlugin<E> {
+    fn default() -> Self {
+        EndpointPlugin::new(PreUpdate)
+    }
+}
+
 impl<E: Endpoint + Send + Sync + 'static> Plugin for EndpointPlugin<E>
 where
     E::ConnectionId: Send + Sync,
@@ -44,7 +44,7 @@ where
         app.add_event::<Connected>();
         app.add_event::<Disconnected>();
 
-        app.add_systems(self.schedule, update_endpoints::<E>);
+        app.add_systems(self.schedule, endpoint::update_endpoints::<E>);
     }
 }
 

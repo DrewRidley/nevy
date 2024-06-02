@@ -105,18 +105,16 @@ impl<'s> RecvStreamMut<'s> for WebTransportRecvStreamMut<'s> {
 
 impl<'s> RecvStreamRef<'s> for WebTransportRecvStreamRef {}
 
-impl<'c> StreamId<'c, WebTransportConnectionMut<'c>> for WebTransportStreamId {
-    type SendMut<'s> = WebTransportSendStreamMut<'s>
-    where
-        Self: 's;
+impl StreamId for WebTransportStreamId {
+    type Connection<'c> = WebTransportConnectionMut<'c>;
 
-    type RecvMut<'s> = WebTransportRecvStreamMut<'s>
-    where
-        Self: 's;
+    type SendMut<'s> = WebTransportSendStreamMut<'s>;
+
+    type RecvMut<'s> = WebTransportRecvStreamMut<'s>;
 
     type OpenDescription = quinn_proto::Dir;
 
-    fn open(
+    fn open<'c>(
         connection: &mut WebTransportConnectionMut<'c>,
         description: Self::OpenDescription,
     ) -> Option<Self> {
@@ -164,7 +162,7 @@ impl<'c> StreamId<'c, WebTransportConnectionMut<'c>> for WebTransportStreamId {
         Some(stream_id)
     }
 
-    fn get_send_mut<'s>(
+    fn get_send_mut<'c, 's>(
         self,
         connection: &'s mut WebTransportConnectionMut<'c>,
     ) -> Option<Self::SendMut<'s>> {
@@ -174,7 +172,7 @@ impl<'c> StreamId<'c, WebTransportConnectionMut<'c>> for WebTransportStreamId {
         })
     }
 
-    fn get_recv_mut<'s>(
+    fn get_recv_mut<'c, 's>(
         self,
         connection: &'s mut WebTransportConnectionMut<'c>,
     ) -> Option<Self::RecvMut<'s>> {
@@ -184,21 +182,23 @@ impl<'c> StreamId<'c, WebTransportConnectionMut<'c>> for WebTransportStreamId {
         })
     }
 
-    fn get_send<'s>(
+    fn get_send<'c, 's>(
         self,
         _connection: &'s WebTransportConnectionRef<'c>,
     ) -> Option<<Self::SendMut<'s> as SendStreamMut<'s>>::NonMut<'s>> {
         Some(WebTransportSendStreamRef)
     }
 
-    fn get_recv<'s>(
+    fn get_recv<'c, 's>(
         self,
         _connection: &'s WebTransportConnectionRef<'c>,
     ) -> Option<<Self::RecvMut<'s> as RecvStreamMut<'s>>::NonMut<'s>> {
         Some(WebTransportRecvStreamRef)
     }
 
-    fn poll_events(connection: &mut WebTransportConnectionMut<'c>) -> Option<StreamEvent<Self>> {
+    fn poll_events<'c>(
+        connection: &mut WebTransportConnectionMut<'c>,
+    ) -> Option<StreamEvent<Self>> {
         connection.web_transport.stream_events.pop_front()
     }
 }

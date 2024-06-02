@@ -122,14 +122,16 @@ impl<'s, 'c> RecvStreamMut<'s> for QuinnRecvStreamMut<'s> {
 
 impl<'s> RecvStreamRef<'s> for QuinnRecvStreamRef {}
 
-impl<'c> StreamId<'c, &'c mut QuinnConnection> for QuinnStreamId {
+impl StreamId for QuinnStreamId {
+    type Connection<'c> = &'c mut QuinnConnection;
+
     type SendMut<'s> = QuinnSendStreamMut<'s>;
 
     type RecvMut<'s> = QuinnRecvStreamMut<'s>;
 
     type OpenDescription = quinn_proto::Dir;
 
-    fn open(
+    fn open<'c>(
         connection: &mut &'c mut QuinnConnection,
         description: Self::OpenDescription,
     ) -> Option<Self> {
@@ -138,7 +140,7 @@ impl<'c> StreamId<'c, &'c mut QuinnConnection> for QuinnStreamId {
         ))
     }
 
-    fn get_send_mut<'s>(
+    fn get_send_mut<'c, 's>(
         self,
         connection: &'s mut &'c mut QuinnConnection,
     ) -> Option<Self::SendMut<'s>> {
@@ -147,7 +149,7 @@ impl<'c> StreamId<'c, &'c mut QuinnConnection> for QuinnStreamId {
         })
     }
 
-    fn get_recv_mut<'s>(
+    fn get_recv_mut<'c, 's>(
         self,
         connection: &'s mut &'c mut QuinnConnection,
     ) -> Option<Self::RecvMut<'s>> {
@@ -158,21 +160,21 @@ impl<'c> StreamId<'c, &'c mut QuinnConnection> for QuinnStreamId {
         })
     }
 
-    fn get_send<'s>(
+    fn get_send<'c, 's>(
         self,
         _connection: &'s &'c QuinnConnection,
     ) -> Option<<Self::SendMut<'s> as SendStreamMut<'s>>::NonMut<'s>> {
         Some(QuinnSendStreamRef)
     }
 
-    fn get_recv<'s>(
+    fn get_recv<'c, 's>(
         self,
         _connection: &'s &'c QuinnConnection,
     ) -> Option<<Self::RecvMut<'s> as RecvStreamMut<'s>>::NonMut<'s>> {
         Some(QuinnRecvStreamRef)
     }
 
-    fn poll_events(connection: &mut &'c mut QuinnConnection) -> Option<StreamEvent<Self>> {
+    fn poll_events<'c>(connection: &mut &'c mut QuinnConnection) -> Option<StreamEvent<Self>> {
         connection.stream_events.pop_front()
     }
 }

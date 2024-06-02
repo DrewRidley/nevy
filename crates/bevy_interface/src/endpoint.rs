@@ -1,12 +1,15 @@
 use bevy::{prelude::*, utils::HashMap};
 use transport_interface::*;
 
-use crate::{BevyConnection, Connected, Disconnected};
+use crate::{connection::BevyConnection, Connected, Disconnected};
 
+/// the component that holds state and represents a networking endpoint
+///
+/// use the [Connections] system parameter to manage connections
 #[derive(Component)]
 pub struct BevyEndpoint<E: Endpoint> {
-    endpoint: E,
-    connections: HashMap<E::ConnectionId, Entity>,
+    pub(crate) endpoint: E,
+    pub(crate) connections: HashMap<E::ConnectionId, Entity>,
 }
 
 impl<E: Endpoint> BevyEndpoint<E> {
@@ -18,7 +21,7 @@ impl<E: Endpoint> BevyEndpoint<E> {
     }
 }
 
-/// system parameter used for connecting and disconnecting endpoints
+/// system parameter used for managing [BevyConnection]s on [BevyEndpoint]s
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct Connections<'w, 's, E: Endpoint + Send + Sync + 'static>
 where
@@ -33,6 +36,8 @@ impl<'w, 's, E: Endpoint + Send + Sync + 'static> Connections<'w, 's, E>
 where
     E::ConnectionId: Send + Sync,
 {
+    /// calls the connect method on the internal endpoint.
+    /// if successful will spawn a [BevyConnection] as a child of the endpoint and return it
     pub fn connect(&mut self, endpoint_entity: Entity, info: E::ConnectInfo) -> Option<Entity> {
         let mut endpoint = self.endpoint_q.get_mut(endpoint_entity).ok()?;
 
@@ -43,6 +48,7 @@ where
         let connection_entity = self
             .commands
             .spawn(BevyConnection::<E>::new(connection_id))
+            .set_parent(endpoint_entity)
             .id();
 
         debug!(
@@ -54,16 +60,53 @@ where
         Some(connection_entity)
     }
 
+    /// attempts to disconnect a connection
+    ///
+    /// will do nothing if the connection does not exist or it's parent isn't an endpoint
     pub fn disconnect(&mut self, connection_entity: Entity) {
         let Ok((connection_parent, connection)) = self.connection_q.get(connection_entity) else {
             return;
         };
 
-        let Ok(mut endpoint) = self.endpoint_q.get_mut(connection_parent.get()) else {
+        let endpoint_entity = connection_parent.get();
+
+        let Ok(mut endpoint) = self.endpoint_q.get_mut(endpoint_entity) else {
+            error!(
+                "connection {:?}'s parent {:?} could not be queried as an endpoint. ({})",
+                connection_entity,
+                endpoint_entity,
+                std::any::type_name::<E>()
+            );
             return;
         };
 
         let _ = endpoint.endpoint.disconnect(connection.connection_id);
+    }
+
+    /// returns the peer address for some connection if it exists
+    pub fn peer_addr(&self, connection_entity: Entity) -> Option<std::net::SocketAddr> {
+        let Ok((connection_parent, connection)) = self.connection_q.get(connection_entity) else {
+            return None;
+        };
+
+        let endpoint_entity = connection_parent.get();
+
+        let Ok(endpoint) = self.endpoint_q.get(endpoint_entity) else {
+            error!(
+                "connection {:?}'s parent {:?} could not be queried as an endpoint. ({})",
+                connection_entity,
+                endpoint_entity,
+                std::any::type_name::<E>()
+            );
+            return None;
+        };
+
+        Some(
+            endpoint
+                .endpoint
+                .connection(connection.connection_id)?
+                .peer_addr(),
+        )
     }
 }
 
@@ -89,7 +132,10 @@ pub(crate) fn update_endpoints<E: Endpoint + Send + Sync + 'static>(
                         .connections
                         .entry(connection_id.clone())
                         .or_insert_with(|| {
-                            commands.spawn(BevyConnection::<E>::new(connection_id)).id()
+                            commands
+                                .spawn(BevyConnection::<E>::new(connection_id))
+                                .set_parent(endpoint_entity)
+                                .id()
                         });
 
                     connected_w.send(Connected {
