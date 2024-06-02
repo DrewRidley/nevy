@@ -1,3 +1,17 @@
+[package]
+name = "nevy"
+version = "0.1.0-dev"
+edition = "2021"
+categories = ["network-programming", "game-development"]
+description = "Simple, expressive networking for your bevy games"
+keywords = ["netcode", "networking", "bevy"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/DrewRidley/nevy"
+documentation = "https://docs.rs/nevy"
+
+[dependencies]
+bevy_interface.path = "./crates/bevy_interface"
 
 [workspace]
 members = ["crates/*"]
@@ -5,5 +19,3 @@ resolver = "2"
 
 [workspace.dependencies]
 bevy = { version = "0.13", default-features = false }
-
-# profile.dev.opt-level = "3"

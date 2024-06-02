@@ -1,9 +1,8 @@
-use std::{collections::HashMap, io::Read, sync::Arc, time::Duration};
+use std::{io::Read, sync::Arc, time::Duration};
 
 use bevy::prelude::*;
 use bevy_interface::prelude::*;
 use nevy_quic::prelude::*;
-use transport_interface::*;
 
 fn main() {
     let mut app = App::new();

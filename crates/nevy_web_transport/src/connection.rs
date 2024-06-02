@@ -96,14 +96,14 @@ impl<'c> WebTransportConnectionMut<'c> {
 
     /// transitions to the failed state and disconnects the quic connection
     fn fail(&mut self) {
-        trace!("{} | -> Failed", self.peer_addr());
+        trace!("{} | -> Failed", self.get_stats());
         self.web_transport.state = ConnectionState::Failed;
         self.quinn.disconnect();
     }
 
     /// transitions to the connected state and fires the connected event
     fn success(&mut self) {
-        trace!("{} | -> Connected", self.peer_addr());
+        trace!("{} | -> Connected", self.get_stats());
         self.web_transport.state = ConnectionState::Connected;
         self.events.push_back(EndpointEvent {
             connection_id: self.connection_id,
@@ -123,10 +123,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                     if let (ConnectionState::ServerWaitConnectStream, true) =
                         (&self.web_transport.state, peer_generated)
                     {
-                        trace!(
-                            "{} | -> ServerReadConnectRequest",
-                            self.as_ref().peer_addr()
-                        );
+                        trace!("{} | -> ServerReadConnectRequest", self.get_stats());
                         self.web_transport.state =
                             ConnectionState::ServerReadConnectRequest(stream_id, Vec::new());
                         continue;
@@ -151,7 +148,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                         (&self.web_transport.state, peer_generated)
                     {
                         // Client opened uni stream to send Settings.
-                        trace!("{} | -> ServerReadSettings", self.peer_addr());
+                        trace!("{} | -> ServerReadSettings", self.get_stats());
                         self.web_transport.state =
                             ConnectionState::ServerReadSettings(stream_id, Vec::new());
                         continue;
@@ -163,7 +160,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                         // Server opened uni stream to send settings response.
                         trace!(
                             "{} | -> ClientReceiveSettingsResponse",
-                            self.as_ref().peer_addr()
+                            self.as_ref().get_stats()
                         );
                         self.web_transport.state =
                             ConnectionState::ClientReceiveSettingsResponse(stream_id, Vec::new());
@@ -221,7 +218,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                 }
 
                 if buffer.is_empty() {
-                    trace!("{} | -> ClientWaitSettingsResponse", self.peer_addr());
+                    trace!("{} | -> ClientWaitSettingsResponse", self.get_stats());
                     self.web_transport.state = ConnectionState::ClientWaitSettingsResponse;
                 }
             }
@@ -246,7 +243,7 @@ impl<'c> WebTransportConnectionMut<'c> {
 
                         connect_req.encode(&mut buffer);
 
-                        trace!("{} | -> ClientSendConnect", self.peer_addr());
+                        trace!("{} | -> ClientSendConnect", self.get_stats());
                         self.web_transport.state =
                             ConnectionState::ClientSendConnect(stream_id, buffer);
                     }
@@ -266,7 +263,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                 buffer.clear();
 
                 if buffer.is_empty() {
-                    trace!("{} | ->  ClientReceiveConnectResponse", self.peer_addr());
+                    trace!("{} | ->  ClientReceiveConnectResponse", self.get_stats());
                     self.web_transport.state =
                         ConnectionState::ClientReceiveConnectResponse(stream_id, buffer);
                 }
@@ -300,7 +297,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                         settings.enable_webtransport(1);
                         settings.encode(&mut buffer);
 
-                        trace!("{} | -> ServerSendSettingsResponse", self.peer_addr());
+                        trace!("-> ServerSendSettingsResponse");
                         self.web_transport.state =
                             ConnectionState::ServerSendSettingsResponse(stream_id, buffer)
                     }
@@ -316,7 +313,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                 }
 
                 if buffer.is_empty() {
-                    trace!("{} | -> ServerWaitConnectStream", self.peer_addr());
+                    trace!("-> ServerWaitConnectStream");
                     self.web_transport.state = ConnectionState::ServerWaitConnectStream;
                 }
             }
@@ -336,7 +333,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                         };
                         connect_res.encode(&mut buffer);
 
-                        trace!("{} | -> ServerSendConnectResponse", self.peer_addr());
+                        trace!("-> ServerSendConnectResponse");
                         self.web_transport.state =
                             ConnectionState::ServerSendConnectResponse(stream_id, buffer);
                     }
@@ -382,7 +379,7 @@ impl<'c> ConnectionRef<'c> for WebTransportConnectionRef<'c> {
     type ConnectionStats = std::net::SocketAddr;
 
     fn get_stats(&self) -> std::net::SocketAddr {
-        self.quinn.peer_addr()
+        self.quinn.get_stats()
     }
 }
 
