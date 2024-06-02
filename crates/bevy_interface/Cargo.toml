@@ -1,0 +1,8 @@
+[package]
+name = "bevy_interface"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+transport_interface.path = "../transport_interface"
+bevy.workspace = true
