@@ -3,7 +3,10 @@ use std::marker::PhantomData;
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*, utils::intern::Interned};
 use transport_interface::*;
 
-use crate::prelude::{BevyConnection, BevyEndpoint};
+use crate::{
+    endpoint::ConnectionQuery,
+    prelude::{BevyConnection, BevyEndpoint},
+};
 
 pub struct StreamPlugin<E, S> {
     _p: PhantomData<(E, S)>,
@@ -154,8 +157,7 @@ where
     E: Endpoint + Send + Sync + 'static,
     E::ConnectionId: Send + Sync,
 {
-    endpoint_q: Query<'w, 's, &'static mut BevyEndpoint<E>>,
-    connection_q: Query<'w, 's, (&'static Parent, &'static BevyConnection<E>)>,
+    query: ConnectionQuery<'w, 's, E>,
 }
 
 impl<'w, 's, E> Streams<'w, 's, E>
@@ -171,24 +173,21 @@ where
     where
         S: for<'c> StreamId<Connection<'c> = E::Connection<'c>> + Send + Sync + 'static,
     {
-        let Ok((connection_parent, connection)) = self.connection_q.get(connection_entity) else {
-            return None;
-        };
+        let (mut endpoint, connection_id) =
+            self.query.endpoint_of_connection_mut(connection_entity)?;
 
-        let endpoint_entity = connection_parent.get();
-
-        let Ok(mut endpoint) = self.endpoint_q.get_mut(endpoint_entity) else {
-            error!(
-                "connection {:?}'s parent {:?} could not be queried as an endpoint. ({})",
-                connection_entity,
-                endpoint_entity,
-                std::any::type_name::<E>()
-            );
-            return None;
-        };
-
-        let mut connection = endpoint.endpoint.connection_mut(connection.connection_id)?;
+        let mut connection = endpoint.endpoint.connection_mut(connection_id)?;
 
         connection.open_stream(description)
+    }
+
+    pub fn send_stream_mut<'s, S>(
+        &'s mut self,
+        connection_entity: Entity,
+        stream_id: S,
+    ) -> Option<S::SendMut<'s>>
+    where
+        S: for<'c> StreamId<Connection<'c> = E::Connection<'c>> + Send + Sync + 'static,
+    {
     }
 }

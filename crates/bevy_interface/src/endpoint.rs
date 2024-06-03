@@ -21,6 +21,66 @@ impl<E: Endpoint> BevyEndpoint<E> {
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct ConnectionQuery<'w, 's, E: Endpoint + Send + Sync + 'static>
+where
+    E::ConnectionId: Send + Sync + 'static,
+{
+    pub endpoint_q: Query<'w, 's, &'static mut BevyEndpoint<E>>,
+    pub connection_q: Query<'w, 's, (&'static Parent, &'static BevyConnection<E>)>,
+}
+
+impl<'w, 's, E: Endpoint + Send + Sync + 'static> ConnectionQuery<'w, 's, E>
+where
+    E::ConnectionId: Send + Sync,
+{
+    pub fn endpoint_of_connection<'a>(
+        &'a self,
+        connection_entity: Entity,
+    ) -> Option<(&'a BevyEndpoint<E>, E::ConnectionId)> {
+        let Ok((connection_parent, connection)) = self.connection_q.get(connection_entity) else {
+            return None;
+        };
+
+        let endpoint_entity = connection_parent.get();
+
+        let Ok(endpoint) = self.endpoint_q.get(endpoint_entity) else {
+            error!(
+                "connection {:?}'s parent {:?} could not be queried as an endpoint. ({})",
+                connection_entity,
+                endpoint_entity,
+                std::any::type_name::<E>()
+            );
+            return None;
+        };
+
+        Some((endpoint, connection.connection_id))
+    }
+
+    pub fn endpoint_of_connection_mut<'a>(
+        &'a mut self,
+        connection_entity: Entity,
+    ) -> Option<(Mut<'a, BevyEndpoint<E>>, E::ConnectionId)> {
+        let Ok((connection_parent, connection)) = self.connection_q.get(connection_entity) else {
+            return None;
+        };
+
+        let endpoint_entity = connection_parent.get();
+
+        let Ok(endpoint) = self.endpoint_q.get_mut(endpoint_entity) else {
+            error!(
+                "connection {:?}'s parent {:?} could not be queried as an endpoint. ({})",
+                connection_entity,
+                endpoint_entity,
+                std::any::type_name::<E>()
+            );
+            return None;
+        };
+
+        Some((endpoint, connection.connection_id))
+    }
+}
+
 /// system parameter used for managing [BevyConnection]s on [BevyEndpoint]s
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct Connections<'w, 's, E: Endpoint + Send + Sync + 'static>
@@ -28,8 +88,7 @@ where
     E::ConnectionId: Send + Sync + 'static,
 {
     commands: Commands<'w, 's>,
-    endpoint_q: Query<'w, 's, &'static mut BevyEndpoint<E>>,
-    connection_q: Query<'w, 's, (&'static Parent, &'static BevyConnection<E>)>,
+    query: ConnectionQuery<'w, 's, E>,
 }
 
 impl<'w, 's, E: Endpoint + Send + Sync + 'static> Connections<'w, 's, E>
@@ -39,7 +98,7 @@ where
     /// calls the connect method on the internal endpoint.
     /// if successful will spawn a [BevyConnection] as a child of the endpoint and return it
     pub fn connect(&mut self, endpoint_entity: Entity, info: E::ConnectInfo) -> Option<Entity> {
-        let mut endpoint = self.endpoint_q.get_mut(endpoint_entity).ok()?;
+        let mut endpoint = self.query.endpoint_q.get_mut(endpoint_entity).ok()?;
 
         let (connection_id, _) = endpoint.endpoint.connect(info)?;
 
@@ -62,49 +121,20 @@ where
     ///
     /// will do nothing if the connection does not exist or it's parent isn't an endpoint
     pub fn disconnect(&mut self, connection_entity: Entity) {
-        let Ok((connection_parent, connection)) = self.connection_q.get(connection_entity) else {
+        let Some((mut endpoint, connection_id)) =
+            self.query.endpoint_of_connection_mut(connection_entity)
+        else {
             return;
         };
 
-        let endpoint_entity = connection_parent.get();
-
-        let Ok(mut endpoint) = self.endpoint_q.get_mut(endpoint_entity) else {
-            error!(
-                "connection {:?}'s parent {:?} could not be queried as an endpoint. ({})",
-                connection_entity,
-                endpoint_entity,
-                std::any::type_name::<E>()
-            );
-            return;
-        };
-
-        let _ = endpoint.endpoint.disconnect(connection.connection_id);
+        let _ = endpoint.endpoint.disconnect(connection_id);
     }
 
     /// returns the stats for some connection if it exists
     pub fn get_stats<'c>(&'c self, connection_entity: Entity) -> Option<<<E::Connection<'c> as ConnectionMut<'c>>::NonMut<'c> as ConnectionRef<'c>>::ConnectionStats>{
-        let Ok((connection_parent, connection)) = self.connection_q.get(connection_entity) else {
-            return None;
-        };
+        let (endpoint, connection_id) = self.query.endpoint_of_connection(connection_entity)?;
 
-        let endpoint_entity = connection_parent.get();
-
-        let Ok(endpoint) = self.endpoint_q.get(endpoint_entity) else {
-            error!(
-                "connection {:?}'s parent {:?} could not be queried as an endpoint. ({})",
-                connection_entity,
-                endpoint_entity,
-                std::any::type_name::<E>()
-            );
-            return None;
-        };
-
-        Some(
-            endpoint
-                .endpoint
-                .connection(connection.connection_id)?
-                .get_stats(),
-        )
+        Some(endpoint.endpoint.connection(connection_id)?.get_stats())
     }
 }
 
