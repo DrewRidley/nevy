@@ -40,16 +40,11 @@ impl QuinnConnection {
         }
     }
 
-    pub(crate) fn poll_events(&mut self, events: &mut VecDeque<EndpointEvent<QuinnEndpoint>>) {
+    pub(crate) fn poll_events(&mut self, handler: &mut impl EndpointEventHandler<QuinnEndpoint>) {
         while let Some(app_event) = self.connection.poll() {
             match app_event {
                 quinn_proto::Event::HandshakeDataReady => (),
-                quinn_proto::Event::Connected => {
-                    events.push_back(EndpointEvent {
-                        connection_id: self.connection_id,
-                        event: ConnectionEvent::Connected,
-                    });
-                }
+                quinn_proto::Event::Connected => handler.connected(self.connection_id),
                 quinn_proto::Event::ConnectionLost { reason: _ } => {}
                 quinn_proto::Event::Stream(_s) => {}
                 quinn_proto::Event::DatagramReceived => {}

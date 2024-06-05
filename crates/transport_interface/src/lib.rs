@@ -15,11 +15,13 @@ pub trait Endpoint {
     /// so that it can be used reasonably in generic contexts
     type ConnectionId: std::hash::Hash + Eq + Copy;
 
-    type ConnectInfo;
+    type ConnectInfo<'a>;
+
+    type IncomingConnectionInfo<'a>;
 
     /// Polls this endpoint and progresses its internal state.
     /// This may have a different effect on different endpoints, but generally it will also consume data from the underlying mechanism (socket).
-    fn update(&mut self);
+    fn update(&mut self, handler: &mut impl EndpointEventHandler<Self>);
 
     /// Retrieves a connection reference from the endpoint given its unique id.
     fn connection<'c>(
@@ -31,9 +33,9 @@ pub trait Endpoint {
     fn connection_mut<'a>(&'a mut self, id: Self::ConnectionId) -> Option<Self::Connection<'a>>;
 
     /// creates a connection described by `info`
-    fn connect<'c>(
+    fn connect<'c, 'a>(
         &'c mut self,
-        info: Self::ConnectInfo,
+        info: Self::ConnectInfo<'a>,
     ) -> Option<(Self::ConnectionId, Self::Connection<'c>)>;
 
     /// Closes a connection matching the provided id.
@@ -45,10 +47,21 @@ pub trait Endpoint {
             Err(())
         }
     }
+}
 
-    fn poll_event(&mut self) -> Option<EndpointEvent<Self>>
-    where
-        Self: Sized;
+/// implement this trait on a type to handle events when updating an [Endpoint]
+pub trait EndpointEventHandler<E: Endpoint>
+where
+    E: ?Sized,
+{
+    #[allow(unused_variables)]
+    fn connection_request<'a>(&mut self, request: E::IncomingConnectionInfo<'a>) -> bool {
+        true
+    }
+
+    fn connected(&mut self, connection_id: E::ConnectionId);
+
+    fn disconnected(&mut self, connection_id: E::ConnectionId);
 }
 
 /// contains all the operations that can be made with a mutable reference to connection state with a lifetime of `'c`
@@ -73,7 +86,6 @@ pub trait ConnectionMut<'c> {
     where
         S: StreamId<Connection<'c> = Self>,
         S: 'c,
-        Self: Sized,
     {
         S::open(self, description)
     }
@@ -83,7 +95,6 @@ pub trait ConnectionMut<'c> {
     where
         S: StreamId<Connection<'c> = Self>,
         S: 'c,
-        Self: Sized,
     {
         stream_id.get_send_mut(self)
     }
@@ -93,7 +104,6 @@ pub trait ConnectionMut<'c> {
     where
         S: StreamId<Connection<'c> = Self>,
         S: 'c,
-        Self: Sized,
     {
         stream_id.get_recv_mut(self)
     }
@@ -103,7 +113,6 @@ pub trait ConnectionMut<'c> {
     where
         S: StreamId<Connection<'c> = Self>,
         S: 'c,
-        Self: Sized,
     {
         S::poll_events(self)
     }
@@ -241,20 +250,6 @@ pub trait RecvStreamMut<'s> {
 
 /// contains operations for a reference to a recv stream with lifetime `'s`
 pub trait RecvStreamRef<'s> {}
-
-/// events fired by endpoints
-///
-/// all events are with reference to connections
-pub struct EndpointEvent<E: Endpoint> {
-    pub connection_id: E::ConnectionId,
-    pub event: ConnectionEvent,
-}
-
-/// the type of [EndpointEvent]
-pub enum ConnectionEvent {
-    Connected,
-    Disconnected,
-}
 
 /// events fired by streams
 pub struct StreamEvent<S> {

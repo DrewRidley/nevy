@@ -3,7 +3,7 @@ use log::*;
 use quinn_proto::{ConnectionEvent, DatagramEvent, Incoming};
 use quinn_udp::{UdpSockRef, UdpSocketState};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     io::IoSliceMut,
     net::{SocketAddr, UdpSocket},
     sync::Arc,
@@ -22,7 +22,6 @@ pub struct QuinnEndpoint {
     connections: HashMap<QuinnConnectionId, QuinnConnection>,
     config: quinn_proto::EndpointConfig,
     server_config: Option<quinn_proto::ServerConfig>,
-    events: VecDeque<EndpointEvent<QuinnEndpoint>>,
     recv_buffer: Vec<u8>,
     send_buffer: Vec<u8>,
 }
@@ -57,14 +56,13 @@ impl QuinnEndpoint {
             socket_state,
             config,
             server_config,
-            events: VecDeque::new(),
             recv_buffer: Vec::new(),
             send_buffer: Vec::new(),
         })
     }
 
     // Receive UDP datagrams for internal processing.
-    fn receive_datagrams(&mut self) {
+    fn receive_datagrams(&mut self, handler: &mut impl EndpointEventHandler<Self>) {
         let mut recv_buffer = std::mem::take(&mut self.recv_buffer);
 
         let min_buffer_len = self.config.get_max_udp_payload_size().min(64 * 1024) as usize
@@ -90,7 +88,7 @@ impl QuinnEndpoint {
                 &mut metas,
             ) {
                 Ok(datagram_count) => {
-                    self.process_packet(datagram_count, &buffer_chunks, &metas);
+                    self.process_packet(datagram_count, &buffer_chunks, &metas, handler);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
                 Err(other) => {
@@ -113,6 +111,7 @@ impl QuinnEndpoint {
         datagram_count: usize,
         buffer_chunks: &[IoSliceMut; quinn_udp::BATCH_SIZE],
         metas: &[quinn_udp::RecvMeta; quinn_udp::BATCH_SIZE],
+        handler: &mut impl EndpointEventHandler<Self>,
     ) {
         trace!(
             "Received {datagram_count} UDP datagrams on {}.",
@@ -143,15 +142,19 @@ impl QuinnEndpoint {
                     continue;
                 };
 
-                self.process_datagram_event(datagram_event);
+                self.process_datagram_event(datagram_event, handler);
             }
         }
     }
 
     // Process an event associated with a datagram.
-    fn process_datagram_event(&mut self, event: DatagramEvent) {
+    fn process_datagram_event(
+        &mut self,
+        event: DatagramEvent,
+        handler: &mut impl EndpointEventHandler<Self>,
+    ) {
         let transmit = match event {
-            DatagramEvent::NewConnection(incoming) => self.accept_incoming(incoming),
+            DatagramEvent::NewConnection(incoming) => self.accept_incoming(incoming, handler),
             DatagramEvent::ConnectionEvent(handle, event) => {
                 let connection_id = QuinnConnectionId(handle);
                 self.process_connection_event(connection_id, event);
@@ -170,13 +173,17 @@ impl QuinnEndpoint {
     }
 
     // Accept an incoming connection and optionally return data to transmit to callee.
-    fn accept_incoming(&mut self, incoming: Incoming) -> Option<quinn_proto::Transmit> {
+    fn accept_incoming(
+        &mut self,
+        incoming: Incoming,
+        handler: &mut impl EndpointEventHandler<Self>,
+    ) -> Option<quinn_proto::Transmit> {
         if self.server_config.is_none() {
             warn!("{} attempted to connect to endpoint {} but the endpoint isn't configured as a server", incoming.remote_address(), self.local_addr);
             return Some(self.endpoint.refuse(incoming, &mut self.send_buffer));
         }
 
-        if false {
+        if !handler.connection_request(&incoming) {
             return Some(self.endpoint.refuse(incoming, &mut self.send_buffer));
         };
 
@@ -219,7 +226,7 @@ impl QuinnEndpoint {
     }
 
     // Update the internal connections, polling/advancing their state.
-    fn update_connections(&mut self) {
+    fn update_connections(&mut self, handler: &mut impl EndpointEventHandler<Self>) {
         let max_gso_datagrams = self.socket_state.gro_segments();
 
         for (&connection_id, connection) in self.connections.iter_mut() {
@@ -247,7 +254,7 @@ impl QuinnEndpoint {
                 }
             }
 
-            connection.poll_events(&mut self.events);
+            connection.poll_events(handler);
 
             connection.accept_streams();
         }
@@ -259,12 +266,14 @@ impl Endpoint for QuinnEndpoint {
 
     type ConnectionId = QuinnConnectionId;
 
-    type ConnectInfo = (quinn_proto::ClientConfig, SocketAddr, String);
+    type ConnectInfo<'a> = (quinn_proto::ClientConfig, SocketAddr, &'a str);
+
+    type IncomingConnectionInfo<'a> = &'a quinn_proto::Incoming;
 
     // Processes timeouts, received datagrams and other events.
-    fn update(&mut self) {
-        self.receive_datagrams();
-        self.update_connections();
+    fn update(&mut self, handler: &mut impl EndpointEventHandler<Self>) {
+        self.receive_datagrams(handler);
+        self.update_connections(handler);
     }
 
     // Retrieve a reference to a particular [QuinnConnection].
@@ -281,13 +290,13 @@ impl Endpoint for QuinnEndpoint {
     }
 
     /// Connect to a peer, specified by [Self::ConnectInfo].
-    fn connect<'c>(
+    fn connect<'c, 'a>(
         &'c mut self,
-        info: Self::ConnectInfo,
+        info: Self::ConnectInfo<'a>,
     ) -> Option<(Self::ConnectionId, Self::Connection<'c>)> {
         let (handle, connection) = self
             .endpoint
-            .connect(std::time::Instant::now(), info.0, info.1, info.2.as_str())
+            .connect(std::time::Instant::now(), info.0, info.1, info.2)
             .ok()?;
 
         let connection_id = QuinnConnectionId(handle);
@@ -301,11 +310,6 @@ impl Endpoint for QuinnEndpoint {
         let connection = entry.insert(QuinnConnection::new(connection, connection_id));
 
         Some((connection_id, connection))
-    }
-
-    // Poll the internal events, yielding the oldest one.
-    fn poll_event(&mut self) -> Option<EndpointEvent<Self>> {
-        self.events.pop_front()
     }
 
     // Disconnect a specific connection.

@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    net::SocketAddr,
-};
+use std::{collections::HashMap, net::SocketAddr};
 
 use nevy_quic::prelude::*;
 use transport_interface::*;
@@ -13,7 +10,6 @@ use crate::connection::{
 pub struct WebTransportEndpoint {
     quinn: QuinnEndpoint,
     connections: HashMap<QuinnConnectionId, WebTransportConnection>,
-    events: VecDeque<EndpointEvent<WebTransportEndpoint>>,
 }
 
 impl WebTransportEndpoint {
@@ -27,8 +23,26 @@ impl WebTransportEndpoint {
         Ok(WebTransportEndpoint {
             quinn,
             connections: HashMap::new(),
-            events: VecDeque::new(),
         })
+    }
+}
+
+struct QuinnEventHandler<'a> {
+    connections: Vec<QuinnConnectionId>,
+    on_request: &'a mut dyn EndpointEventHandler<WebTransportEndpoint>,
+}
+
+impl<'a> EndpointEventHandler<QuinnEndpoint> for QuinnEventHandler<'a> {
+    fn connection_request(&mut self, incoming: &quinn_proto::Incoming) -> bool {
+        self.on_request.connection_request(incoming)
+    }
+
+    fn connected(&mut self, connection_id: QuinnConnectionId) {
+        self.connections.push(connection_id);
+    }
+
+    fn disconnected(&mut self, _connection_id: QuinnConnectionId) {
+        todo!()
     }
 }
 
@@ -37,28 +51,26 @@ impl Endpoint for WebTransportEndpoint {
 
     type ConnectionId = QuinnConnectionId;
 
-    type ConnectInfo = (quinn_proto::ClientConfig, SocketAddr, String);
+    type ConnectInfo<'a> = (quinn_proto::ClientConfig, SocketAddr, &'a str);
 
-    fn update(&mut self) {
-        self.quinn.update();
+    type IncomingConnectionInfo<'a> = &'a quinn_proto::Incoming;
 
-        while let Some(EndpointEvent {
-            connection_id,
-            event,
-        }) = self.quinn.poll_event()
-        {
-            match event {
-                ConnectionEvent::Connected => {
-                    if !self.connections.contains_key(&connection_id) {
-                        // will not exist in the case of an incoming connection
-                        self.connections
-                            .insert(connection_id, WebTransportConnection::new());
-                    }
+    fn update(&mut self, handler: &mut impl EndpointEventHandler<WebTransportEndpoint>) {
+        let mut quinn_handler = QuinnEventHandler {
+            connections: Vec::new(),
+            on_request: handler,
+        };
 
-                    self.connection_mut(connection_id).unwrap().connected();
-                }
-                ConnectionEvent::Disconnected => {}
+        self.quinn.update(&mut quinn_handler);
+
+        for connection_id in quinn_handler.connections {
+            if !self.connections.contains_key(&connection_id) {
+                // will not exist in the case of an incoming connection
+                self.connections
+                    .insert(connection_id, WebTransportConnection::new());
             }
+
+            self.connection_mut(connection_id).unwrap().connected();
         }
 
         for (&connection_id, web_transport) in self.connections.iter_mut() {
@@ -69,10 +81,9 @@ impl Endpoint for WebTransportEndpoint {
             WebTransportConnectionMut {
                 quinn,
                 web_transport,
-                events: &mut self.events,
                 connection_id,
             }
-            .update();
+            .update(handler);
         }
     }
 
@@ -82,7 +93,6 @@ impl Endpoint for WebTransportEndpoint {
     ) -> Option<<Self::Connection<'c> as transport_interface::ConnectionMut>::NonMut<'c>> {
         Some(WebTransportConnectionRef {
             quinn: self.quinn.connection(id)?,
-            web_transport: self.connections.get(&id)?,
         })
     }
 
@@ -90,14 +100,13 @@ impl Endpoint for WebTransportEndpoint {
         Some(WebTransportConnectionMut {
             quinn: self.quinn.connection_mut(id)?,
             web_transport: self.connections.get_mut(&id)?,
-            events: &mut self.events,
             connection_id: id,
         })
     }
 
-    fn connect<'c>(
+    fn connect<'c, 'a>(
         &'c mut self,
-        info: Self::ConnectInfo,
+        info: Self::ConnectInfo<'a>,
     ) -> Option<(Self::ConnectionId, Self::Connection<'c>)> {
         let (connection_id, quinn) = self.quinn.connect(info)?;
 
@@ -114,16 +123,8 @@ impl Endpoint for WebTransportEndpoint {
             WebTransportConnectionMut {
                 quinn,
                 web_transport,
-                events: &mut self.events,
                 connection_id,
             },
         ))
-    }
-
-    fn poll_event(&mut self) -> Option<transport_interface::EndpointEvent<Self>>
-    where
-        Self: Sized,
-    {
-        self.events.pop_front()
     }
 }

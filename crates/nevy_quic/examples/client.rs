@@ -20,34 +20,46 @@ fn main() {
         .connect((
             cfg,
             "127.0.0.1:27018".parse().unwrap(),
-            "dev.drewridley.com".to_string(),
+            "dev.drewridley.com",
         ))
         .unwrap();
 
     loop {
-        endpoint.update();
+        struct Handler {
+            connections: Vec<QuinnConnectionId>,
+        }
 
-        while let Some(EndpointEvent {
-            connection_id,
-            event,
-        }) = endpoint.poll_event()
-        {
-            match event {
-                ConnectionEvent::Connected => {
-                    println!("connection");
-
-                    let mut connection = endpoint.connection_mut(connection_id).unwrap();
-
-                    let stream_id: QuinnStreamId =
-                        connection.open_stream(quinn_proto::Dir::Uni).unwrap();
-                    let mut stream = connection.send_stream_mut(stream_id).unwrap();
-                    stream.send(&[1, 2, 3, 4]).unwrap();
-                    stream.close(None).unwrap();
-                }
-                ConnectionEvent::Disconnected => {
-                    println!("disconnection");
-                }
+        impl EndpointEventHandler<QuinnEndpoint> for Handler {
+            fn connection_request<'a>(
+                &mut self,
+                _request: <QuinnEndpoint as Endpoint>::IncomingConnectionInfo<'a>,
+            ) -> bool {
+                false
             }
+
+            fn connected(&mut self, connection_id: <QuinnEndpoint as Endpoint>::ConnectionId) {
+                println!("connection");
+                self.connections.push(connection_id);
+            }
+
+            fn disconnected(&mut self, _connection_id: <QuinnEndpoint as Endpoint>::ConnectionId) {
+                println!("disconnection");
+            }
+        }
+
+        let mut handler = Handler {
+            connections: Vec::new(),
+        };
+
+        endpoint.update(&mut handler);
+
+        for connection_id in handler.connections {
+            let mut connection = endpoint.connection_mut(connection_id).unwrap();
+
+            let stream_id: QuinnStreamId = connection.open_stream(quinn_proto::Dir::Uni).unwrap();
+            let mut stream = connection.send_stream_mut(stream_id).unwrap();
+            stream.send(&[1, 2, 3, 4]).unwrap();
+            stream.close(None).unwrap();
         }
     }
 }

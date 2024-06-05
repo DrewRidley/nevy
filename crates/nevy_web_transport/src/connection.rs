@@ -46,13 +46,11 @@ pub(crate) enum ConnectionState {
 pub struct WebTransportConnectionMut<'c> {
     pub(crate) quinn: &'c mut QuinnConnection,
     pub(crate) web_transport: &'c mut WebTransportConnection,
-    pub(crate) events: &'c mut VecDeque<EndpointEvent<WebTransportEndpoint>>,
     pub(crate) connection_id: QuinnConnectionId,
 }
 
 pub struct WebTransportConnectionRef<'c> {
     pub(crate) quinn: &'c QuinnConnection,
-    pub(crate) web_transport: &'c WebTransportConnection,
 }
 
 impl WebTransportConnection {
@@ -102,16 +100,13 @@ impl<'c> WebTransportConnectionMut<'c> {
     }
 
     /// transitions to the connected state and fires the connected event
-    fn success(&mut self) {
+    fn success(&mut self, handler: &mut impl EndpointEventHandler<WebTransportEndpoint>) {
         trace!("{} | -> Connected", self.get_stats());
         self.web_transport.state = ConnectionState::Connected;
-        self.events.push_back(EndpointEvent {
-            connection_id: self.connection_id,
-            event: ConnectionEvent::Connected,
-        });
+        handler.connected(self.connection_id);
     }
 
-    pub(crate) fn update(&mut self) {
+    pub(crate) fn update(&mut self, handler: &mut impl EndpointEventHandler<WebTransportEndpoint>) {
         while let Some(StreamEvent {
             stream_id,
             peer_generated,
@@ -273,7 +268,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                 match read_connect_response(stream, buffer) {
                     ReadResult::Wait => (),
                     ReadResult::Fail => self.fail(),
-                    ReadResult::Success => self.success(),
+                    ReadResult::Success => self.success(handler),
                 }
             }
 
@@ -349,7 +344,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                 }
 
                 if buffer.is_empty() {
-                    self.success();
+                    self.success(handler);
                 }
             }
             ConnectionState::Connected => (),
@@ -364,10 +359,7 @@ impl<'c> ConnectionMut<'c> for WebTransportConnectionMut<'c> {
         Self: 'b;
 
     fn as_ref<'b>(&'b self) -> Self::NonMut<'b> {
-        WebTransportConnectionRef {
-            quinn: self.quinn,
-            web_transport: self.web_transport,
-        }
+        WebTransportConnectionRef { quinn: self.quinn }
     }
 
     fn disconnect(&mut self) {

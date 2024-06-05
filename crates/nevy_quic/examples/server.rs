@@ -53,24 +53,25 @@ fn main() {
     let mut connections = HashMap::new();
 
     loop {
-        endpoint.update();
+        struct Handler<'a> {
+            connections: &'a mut HashMap<QuinnConnectionId, HashMap<QuinnStreamId, Vec<u8>>>,
+        }
 
-        while let Some(EndpointEvent {
-            connection_id,
-            event,
-        }) = endpoint.poll_event()
-        {
-            match event {
-                ConnectionEvent::Connected => {
-                    println!("connection");
-                    connections.insert(connection_id, HashMap::new());
-                }
-                ConnectionEvent::Disconnected => {
-                    println!("disconnection");
-                    connections.remove(&connection_id);
-                }
+        impl<'a> EndpointEventHandler<QuinnEndpoint> for Handler<'a> {
+            fn connected(&mut self, connection_id: QuinnConnectionId) {
+                println!("connection");
+                self.connections.insert(connection_id, HashMap::new());
+            }
+
+            fn disconnected(&mut self, connection_id: QuinnConnectionId) {
+                println!("disconnection");
+                self.connections.remove(&connection_id);
             }
         }
+
+        endpoint.update(&mut Handler {
+            connections: &mut connections,
+        });
 
         for (&connection_id, streams) in connections.iter_mut() {
             let mut connection = endpoint.connection_mut(connection_id).unwrap();
