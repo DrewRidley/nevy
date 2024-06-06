@@ -50,13 +50,19 @@ pub trait Endpoint {
 }
 
 /// implement this trait on a type to handle events when updating an [Endpoint]
+///
+/// make sure to override the [connection_request](EndpointEventHandler::connection_request)
+/// method or incoming connections will always be rejected
 pub trait EndpointEventHandler<E: Endpoint>
 where
     E: ?Sized,
 {
+    /// callback to query if an incoming connection should be accepted
+    ///
+    /// return `true` to accept
     #[allow(unused_variables)]
     fn connection_request<'a>(&mut self, request: E::IncomingConnectionInfo<'a>) -> bool {
-        true
+        false
     }
 
     fn connected(&mut self, connection_id: E::ConnectionId);
