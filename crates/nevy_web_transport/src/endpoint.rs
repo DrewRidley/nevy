@@ -27,25 +27,6 @@ impl WebTransportEndpoint {
     }
 }
 
-struct QuinnEventHandler<'a> {
-    connections: Vec<QuinnConnectionId>,
-    on_request: &'a mut dyn EndpointEventHandler<WebTransportEndpoint>,
-}
-
-impl<'a> EndpointEventHandler<QuinnEndpoint> for QuinnEventHandler<'a> {
-    fn connection_request(&mut self, incoming: &quinn_proto::Incoming) -> bool {
-        self.on_request.connection_request(incoming)
-    }
-
-    fn connected(&mut self, connection_id: QuinnConnectionId) {
-        self.connections.push(connection_id);
-    }
-
-    fn disconnected(&mut self, _connection_id: QuinnConnectionId) {
-        todo!()
-    }
-}
-
 impl Endpoint for WebTransportEndpoint {
     type Connection<'a> = WebTransportConnectionMut<'a>;
 
@@ -56,8 +37,29 @@ impl Endpoint for WebTransportEndpoint {
     type IncomingConnectionInfo<'a> = &'a quinn_proto::Incoming;
 
     fn update(&mut self, handler: &mut impl EndpointEventHandler<WebTransportEndpoint>) {
+        struct QuinnEventHandler<'a> {
+            connections: Vec<QuinnConnectionId>,
+            disconnections: Vec<QuinnConnectionId>,
+            on_request: &'a mut dyn EndpointEventHandler<WebTransportEndpoint>,
+        }
+
+        impl<'a> EndpointEventHandler<QuinnEndpoint> for QuinnEventHandler<'a> {
+            fn connection_request(&mut self, incoming: &quinn_proto::Incoming) -> bool {
+                self.on_request.connection_request(incoming)
+            }
+
+            fn connected(&mut self, connection_id: QuinnConnectionId) {
+                self.connections.push(connection_id);
+            }
+
+            fn disconnected(&mut self, connection_id: QuinnConnectionId) {
+                self.disconnections.push(connection_id);
+            }
+        }
+
         let mut quinn_handler = QuinnEventHandler {
             connections: Vec::new(),
+            disconnections: Vec::new(),
             on_request: handler,
         };
 
@@ -71,6 +73,10 @@ impl Endpoint for WebTransportEndpoint {
             }
 
             self.connection_mut(connection_id).unwrap().connected();
+        }
+
+        for connection_id in quinn_handler.disconnections {
+            self.connections.remove(&connection_id);
         }
 
         for (&connection_id, web_transport) in self.connections.iter_mut() {

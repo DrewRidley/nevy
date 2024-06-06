@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use nevy_quic::connection::QuinnConnectionId;
 use nevy_web_transport::{endpoint::WebTransportEndpoint, streams::WebTransportStreamId};
@@ -16,11 +16,21 @@ fn main() {
     .unwrap();
     cfg.alpn_protocols = vec![b"h3".to_vec()];
 
-    let quic_cfg: QuicClientConfig = cfg.try_into().unwrap();
-    let cfg = quinn_proto::ClientConfig::new(Arc::new(quic_cfg));
+    let quic_config: QuicClientConfig = cfg.try_into().unwrap();
+    let mut quinn_config = quinn_proto::ClientConfig::new(Arc::new(quic_config));
+
+    let mut transport_config = quinn_proto::TransportConfig::default();
+    transport_config.max_idle_timeout(Some(Duration::from_secs(10).try_into().unwrap()));
+    transport_config.keep_alive_interval(Some(Duration::from_millis(200)));
+
+    quinn_config.transport_config(Arc::new(transport_config));
 
     endpoint
-        .connect((cfg, "127.0.0.1:443".parse().unwrap(), "dev.drewridley.com"))
+        .connect((
+            quinn_config,
+            "127.0.0.1:443".parse().unwrap(),
+            "dev.drewridley.com",
+        ))
         .unwrap();
 
     loop {

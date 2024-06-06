@@ -229,8 +229,8 @@ impl QuinnEndpoint {
     fn update_connections(&mut self, handler: &mut impl EndpointEventHandler<Self>) {
         let max_gso_datagrams = self.socket_state.gro_segments();
 
-        for (&connection_id, connection) in self.connections.iter_mut() {
-            //Return transmission to endpoint if there is one.
+        self.connections.retain(|&connection_id, connection| {
+            // Return transmission to endpoint if there is one.
             self.send_buffer.clear();
             if let Some(transmit) = connection.connection.poll_transmit(
                 std::time::Instant::now(),
@@ -246,7 +246,11 @@ impl QuinnEndpoint {
 
             connection.poll_timeouts();
 
+            let mut drained = false;
+
             while let Some(endpoint_event) = connection.connection.poll_endpoint_events() {
+                drained |= endpoint_event.is_drained();
+
                 if let Some(conn_event) =
                     self.endpoint.handle_event(connection_id.0, endpoint_event)
                 {
@@ -257,7 +261,13 @@ impl QuinnEndpoint {
             connection.poll_events(handler);
 
             connection.accept_streams();
-        }
+
+            if drained {
+                println!("Freed connection");
+            }
+
+            !drained
+        });
     }
 }
 

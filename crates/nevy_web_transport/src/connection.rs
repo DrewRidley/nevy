@@ -363,7 +363,7 @@ impl<'c> ConnectionMut<'c> for WebTransportConnectionMut<'c> {
     }
 
     fn disconnect(&mut self) {
-        todo!()
+        self.quinn.disconnect();
     }
 }
 

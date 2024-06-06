@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use nevy_quic::prelude::*;
 use quinn_proto::crypto::rustls::QuicClientConfig;
@@ -7,18 +7,24 @@ use transport_interface::*;
 fn main() {
     let mut endpoint = QuinnEndpoint::new("0.0.0.0:0".parse().unwrap(), None, None).unwrap();
 
-    let mut cfg = rustls_platform_verifier::tls_config_with_provider(Arc::new(
+    let mut config = rustls_platform_verifier::tls_config_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))
     .unwrap();
-    cfg.alpn_protocols = vec![b"h3".to_vec()];
+    config.alpn_protocols = vec![b"h3".to_vec()];
 
-    let quic_cfg: QuicClientConfig = cfg.try_into().unwrap();
-    let cfg = quinn_proto::ClientConfig::new(Arc::new(quic_cfg));
+    let quic_config: QuicClientConfig = config.try_into().unwrap();
+    let mut quinn_client_config = quinn_proto::ClientConfig::new(Arc::new(quic_config));
+
+    let mut transport_config = quinn_proto::TransportConfig::default();
+    transport_config.max_idle_timeout(Some(Duration::from_secs(10).try_into().unwrap()));
+    transport_config.keep_alive_interval(Some(Duration::from_millis(200)));
+
+    quinn_client_config.transport_config(Arc::new(transport_config));
 
     endpoint
         .connect((
-            cfg,
+            quinn_client_config,
             "127.0.0.1:27018".parse().unwrap(),
             "dev.drewridley.com",
         ))

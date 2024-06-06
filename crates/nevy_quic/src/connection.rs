@@ -93,7 +93,11 @@ impl<'c> ConnectionMut<'c> for &'c mut QuinnConnection {
     }
 
     fn disconnect(&mut self) {
-        todo!("disconnection")
+        self.connection.close(
+            std::time::Instant::now(),
+            Default::default(),
+            Default::default(),
+        );
     }
 }
 

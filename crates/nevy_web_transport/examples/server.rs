@@ -45,8 +45,8 @@ fn main() {
     let mut server_config = quinn_proto::ServerConfig::with_crypto(Arc::new(config));
 
     let mut transport_config = quinn_proto::TransportConfig::default();
-    transport_config.enable_segmentation_offload(false);
-    transport_config.max_idle_timeout(Some(Duration::from_secs(600).try_into().unwrap()));
+    transport_config.max_idle_timeout(Some(Duration::from_secs(10).try_into().unwrap()));
+    transport_config.keep_alive_interval(Some(Duration::from_millis(200)));
 
     server_config.transport = Arc::new(transport_config);
 
