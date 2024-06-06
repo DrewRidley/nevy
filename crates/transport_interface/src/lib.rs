@@ -52,7 +52,7 @@ pub trait Endpoint {
 /// implement this trait on a type to handle events when updating an [Endpoint]
 ///
 /// make sure to override the [connection_request](EndpointEventHandler::connection_request)
-/// method or incoming connections will always be rejected
+/// default implementation or incoming connections will always be rejected by default
 pub trait EndpointEventHandler<E: Endpoint>
 where
     E: ?Sized,
