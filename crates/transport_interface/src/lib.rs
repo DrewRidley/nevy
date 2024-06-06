@@ -60,6 +60,10 @@ where
     /// callback to query if an incoming connection should be accepted
     ///
     /// return `true` to accept
+    ///
+    /// this method could be called multiple for the same connection,
+    /// say if multiple verification stages are needed,
+    /// depending on the specific [Endpoint] implementation
     #[allow(unused_variables)]
     fn connection_request<'a>(&mut self, request: E::IncomingConnectionInfo<'a>) -> bool {
         false
