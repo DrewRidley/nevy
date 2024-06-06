@@ -33,8 +33,6 @@ fn load_certs() -> rustls::ServerConfig {
 }
 
 fn main() {
-    simple_logger::SimpleLogger::new().env().init().unwrap();
-
     let mut config = load_certs();
 
     config.max_early_data_size = u32::MAX;

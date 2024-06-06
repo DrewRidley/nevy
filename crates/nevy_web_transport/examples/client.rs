@@ -6,8 +6,6 @@ use quinn_proto::crypto::rustls::QuicClientConfig;
 use transport_interface::*;
 
 fn main() {
-    simple_logger::SimpleLogger::new().env().init().unwrap();
-
     let mut endpoint = WebTransportEndpoint::new("0.0.0.0:0".parse().unwrap(), None, None).unwrap();
 
     let mut cfg = rustls_platform_verifier::tls_config_with_provider(Arc::new(
