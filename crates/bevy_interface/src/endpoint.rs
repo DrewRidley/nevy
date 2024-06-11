@@ -3,18 +3,22 @@ use transport_interface::*;
 
 use crate::{connection::BevyConnection, Connected, Disconnected};
 
+/// marker component for endpoints
+#[derive(Component)]
+pub struct BevyEndpoint;
+
 /// the component that holds state and represents a networking endpoint
 ///
 /// use the [Connections] system parameter to manage connections
 #[derive(Component)]
-pub struct BevyEndpoint<E: Endpoint> {
+pub struct BevyEndpointState<E: Endpoint> {
     pub(crate) endpoint: E,
     pub(crate) connections: HashMap<E::ConnectionId, Entity>,
 }
 
-impl<E: Endpoint> BevyEndpoint<E> {
+impl<E: Endpoint> BevyEndpointState<E> {
     pub fn new(endpoint: E) -> Self {
-        BevyEndpoint {
+        BevyEndpointState {
             endpoint,
             connections: HashMap::new(),
         }
@@ -26,7 +30,7 @@ pub(crate) struct ConnectionQuery<'w, 's, E: Endpoint + Send + Sync + 'static>
 where
     E::ConnectionId: Send + Sync + 'static,
 {
-    pub endpoint_q: Query<'w, 's, &'static mut BevyEndpoint<E>>,
+    pub endpoint_q: Query<'w, 's, &'static mut BevyEndpointState<E>>,
     pub connection_q: Query<'w, 's, (&'static Parent, &'static BevyConnection<E>)>,
 }
 
@@ -37,7 +41,7 @@ where
     pub fn endpoint_of_connection<'a>(
         &'a self,
         connection_entity: Entity,
-    ) -> Option<(&'a BevyEndpoint<E>, E::ConnectionId)> {
+    ) -> Option<(&'a BevyEndpointState<E>, E::ConnectionId)> {
         let Ok((connection_parent, connection)) = self.connection_q.get(connection_entity) else {
             return None;
         };
@@ -60,7 +64,7 @@ where
     pub fn endpoint_of_connection_mut<'a>(
         &'a mut self,
         connection_entity: Entity,
-    ) -> Option<(Mut<'a, BevyEndpoint<E>>, E::ConnectionId)> {
+    ) -> Option<(Mut<'a, BevyEndpointState<E>>, E::ConnectionId)> {
         let Ok((connection_parent, connection)) = self.connection_q.get(connection_entity) else {
             return None;
         };
@@ -97,7 +101,11 @@ where
 {
     /// calls the connect method on the internal endpoint.
     /// if successful will spawn a [BevyConnection] as a child of the endpoint and return it
-    pub fn connect(&mut self, endpoint_entity: Entity, info: E::ConnectInfo) -> Option<Entity> {
+    pub fn connect<'i>(
+        &mut self,
+        endpoint_entity: Entity,
+        info: E::ConnectInfo<'i>,
+    ) -> Option<Entity> {
         let mut endpoint = self.query.endpoint_q.get_mut(endpoint_entity).ok()?;
 
         let (connection_id, _) = endpoint.endpoint.connect(info)?;
@@ -138,48 +146,82 @@ where
     }
 }
 
+pub(crate) fn insert_missing_bevy_endpoints<E>(
+    mut commands: Commands,
+    endpoint_q: Query<Entity, (With<BevyEndpointState<E>>, Without<BevyEndpoint>)>,
+) where
+    E: Endpoint,
+    BevyEndpointState<E>: Component,
+{
+    for entity in endpoint_q.iter() {
+        commands.entity(entity).insert(BevyEndpoint);
+    }
+}
+
+/// the event handler for updating endpoints in bevy
+struct Handler<'a, 'w, 's, E: Endpoint> {
+    accept_inoming: bool,
+    commands: &'a mut Commands<'w, 's>,
+    connected_w: &'a mut EventWriter<'w, Connected>,
+    disconnected_w: &'a mut EventWriter<'w, Disconnected>,
+    endpoint_entity: Entity,
+    connections: &'a mut HashMap<E::ConnectionId, Entity>,
+}
+
+impl<'a, 'w, 's, E: Endpoint> EndpointEventHandler<E> for Handler<'a, 'w, 's, E>
+where
+    E::ConnectionId: Send + Sync,
+{
+    fn connection_request<'i>(
+        &mut self,
+        _request: <E as Endpoint>::IncomingConnectionInfo<'i>,
+    ) -> bool {
+        self.accept_inoming
+    }
+
+    fn connected(&mut self, connection_id: <E as Endpoint>::ConnectionId) {
+        let &mut connection_entity = self
+            .connections
+            .entry(connection_id.clone())
+            .or_insert_with(|| {
+                self.commands
+                    .spawn(BevyConnection::<E>::new(connection_id))
+                    .set_parent(self.endpoint_entity)
+                    .id()
+            });
+
+        self.connected_w.send(Connected {
+            endpoint_entity: self.endpoint_entity,
+            connection_entity,
+        });
+    }
+
+    fn disconnected(&mut self, connection_id: <E as Endpoint>::ConnectionId) {
+        if let Some(connection_entity) = self.connections.remove(&connection_id) {
+            self.disconnected_w.send(Disconnected {
+                endpoint_entity: self.endpoint_entity,
+                connection_entity,
+            });
+        }
+    }
+}
+
 pub(crate) fn update_endpoints<E: Endpoint + Send + Sync + 'static>(
     mut commands: Commands,
-    mut endpoint_q: Query<(Entity, &mut BevyEndpoint<E>)>,
+    mut endpoint_q: Query<(Entity, &mut BevyEndpointState<E>)>,
     mut connected_w: EventWriter<Connected>,
     mut disconnected_w: EventWriter<Disconnected>,
 ) where
     E::ConnectionId: Send + Sync,
 {
     for (endpoint_entity, mut endpoint) in endpoint_q.iter_mut() {
-        endpoint.endpoint.update();
-
-        while let Some(EndpointEvent {
-            connection_id,
-            event,
-        }) = endpoint.endpoint.poll_event()
-        {
-            match event {
-                ConnectionEvent::Connected => {
-                    let &mut connection_entity = endpoint
-                        .connections
-                        .entry(connection_id.clone())
-                        .or_insert_with(|| {
-                            commands
-                                .spawn(BevyConnection::<E>::new(connection_id))
-                                .set_parent(endpoint_entity)
-                                .id()
-                        });
-
-                    connected_w.send(Connected {
-                        endpoint_entity,
-                        connection_entity,
-                    });
-                }
-                ConnectionEvent::Disconnected => {
-                    if let Some(connection_entity) = endpoint.connections.remove(&connection_id) {
-                        disconnected_w.send(Disconnected {
-                            endpoint_entity,
-                            connection_entity,
-                        });
-                    }
-                }
-            }
-        }
+        endpoint.endpoint.update(&mut Handler {
+            accept_inoming: true, // TODO: add api
+            commands: &mut commands,
+            connected_w: &mut connected_w,
+            disconnected_w: &mut disconnected_w,
+            endpoint_entity,
+            connections: &mut endpoint.connections,
+        });
     }
 }

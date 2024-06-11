@@ -72,7 +72,7 @@ fn spawn_endpoint(mut commands: Commands) {
     let endpoint =
         QuinnEndpoint::new("0.0.0.0:27018".parse().unwrap(), None, Some(server_config)).unwrap();
 
-    commands.spawn((ExampleEndpoint, BevyEndpoint::new(endpoint)));
+    commands.spawn((ExampleEndpoint, BevyEndpointState::new(endpoint)));
 }
 
 fn log_events(

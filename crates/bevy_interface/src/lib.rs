@@ -9,7 +9,7 @@ pub mod streams;
 
 pub mod prelude {
     pub use crate::connection::BevyConnection;
-    pub use crate::endpoint::{BevyEndpoint, Connections};
+    pub use crate::endpoint::{BevyEndpointState, Connections};
     pub use crate::{Connected, Disconnected, EndpointPlugin};
 }
 
@@ -22,6 +22,7 @@ pub struct EndpointPlugin<E> {
 }
 
 impl<E> EndpointPlugin<E> {
+    /// creates a new [EndpointPlugin] that updates in a certain schedule
     fn new(schedule: impl ScheduleLabel) -> Self {
         EndpointPlugin {
             _p: PhantomData,
@@ -44,7 +45,13 @@ where
         app.add_event::<Connected>();
         app.add_event::<Disconnected>();
 
-        app.add_systems(self.schedule, endpoint::update_endpoints::<E>);
+        app.add_systems(
+            self.schedule,
+            (
+                endpoint::insert_missing_bevy_endpoints::<E>,
+                endpoint::update_endpoints::<E>,
+            ),
+        );
     }
 }
 
