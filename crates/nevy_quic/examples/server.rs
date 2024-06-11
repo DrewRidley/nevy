@@ -62,6 +62,13 @@ fn main() {
         }
 
         impl<'a> EndpointEventHandler<QuinnEndpoint> for Handler<'a> {
+            fn connection_request<'i>(
+                &mut self,
+                _request: <QuinnEndpoint as Endpoint>::IncomingConnectionInfo<'i>,
+            ) -> bool {
+                true
+            }
+
             fn connected(&mut self, connection_id: QuinnConnectionId) {
                 println!("connection");
                 self.connections.insert(connection_id, HashMap::new());

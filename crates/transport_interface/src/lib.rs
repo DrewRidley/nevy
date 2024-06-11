@@ -17,7 +17,7 @@ pub trait Endpoint {
 
     type ConnectInfo<'a>;
 
-    type IncomingConnectionInfo<'a>;
+    type IncomingConnectionInfo<'i>;
 
     /// Polls this endpoint and progresses its internal state.
     /// This may have a different effect on different endpoints, but generally it will also consume data from the underlying mechanism (socket).
@@ -65,7 +65,7 @@ where
     /// say if multiple verification stages are needed,
     /// depending on the specific [Endpoint] implementation
     #[allow(unused_variables)]
-    fn connection_request<'a>(&mut self, request: E::IncomingConnectionInfo<'a>) -> bool {
+    fn connection_request<'i>(&mut self, request: E::IncomingConnectionInfo<'i>) -> bool {
         false
     }
 

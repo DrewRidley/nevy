@@ -60,6 +60,13 @@ fn main() {
         }
 
         impl<'a> EndpointEventHandler<WebTransportEndpoint> for Handler<'a> {
+            fn connection_request<'i>(
+                &mut self,
+                request: <WebTransportEndpoint as Endpoint>::IncomingConnectionInfo<'i>,
+            ) -> bool {
+                true
+            }
+
             fn connected(
                 &mut self,
                 connection_id: <WebTransportEndpoint as Endpoint>::ConnectionId,
