@@ -8,7 +8,7 @@ pub mod endpoint;
 pub mod streams;
 
 pub mod prelude {
-    pub use crate::connection::BevyConnection;
+    pub use crate::connection::BevyConnectionState;
     pub use crate::endpoint::{BevyEndpointState, Connections};
     pub use crate::{Connected, Disconnected, EndpointPlugin};
 }

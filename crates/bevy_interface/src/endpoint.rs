@@ -1,16 +1,31 @@
+use std::any::Any;
+
 use bevy::{prelude::*, utils::HashMap};
 use transport_interface::*;
 
-use crate::{connection::BevyConnection, Connected, Disconnected};
-
-/// marker component for endpoints
-#[derive(Component)]
-pub struct BevyEndpoint;
+use crate::{
+    connection::{BevyConnection, BevyConnectionState},
+    Connected, Disconnected,
+};
 
 /// the component that holds state and represents a networking endpoint
 ///
 /// use the [Connections] system parameter to manage connections
 #[derive(Component)]
+pub struct BevyEndpoint {
+    state: Box<dyn Any + Send + Sync + 'static>,
+}
+
+impl BevyEndpoint {
+    fn get<E: 'static>(&self) -> Option<&E> {
+        self.state.downcast_ref()
+    }
+
+    fn get_mut<E: 'static>(&mut self) -> Option<&mut E> {
+        self.state.downcast_mut()
+    }
+}
+
 pub struct BevyEndpointState<E: Endpoint> {
     pub(crate) endpoint: E,
     pub(crate) connections: HashMap<E::ConnectionId, Entity>,
@@ -30,8 +45,8 @@ pub(crate) struct ConnectionQuery<'w, 's, E: Endpoint + Send + Sync + 'static>
 where
     E::ConnectionId: Send + Sync + 'static,
 {
-    pub endpoint_q: Query<'w, 's, &'static mut BevyEndpointState<E>>,
-    pub connection_q: Query<'w, 's, (&'static Parent, &'static BevyConnection<E>)>,
+    pub endpoint_q: Query<'w, 's, &'static mut BevyEndpoint>,
+    pub connection_q: Query<'w, 's, (&'static Parent, &'static BevyConnectionState<E>)>,
 }
 
 impl<'w, 's, E: Endpoint + Send + Sync + 'static> ConnectionQuery<'w, 's, E>
@@ -112,7 +127,7 @@ where
 
         let connection_entity = self
             .commands
-            .spawn(BevyConnection::<E>::new(connection_id))
+            .spawn(BevyConnectionState::<E>::new(connection_id))
             .set_parent(endpoint_entity)
             .id();
 
@@ -158,18 +173,24 @@ pub(crate) fn insert_missing_bevy_endpoints<E>(
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct HandlerParams<'w, 's> {
+    commands: Commands<'w, 's>,
+    connected_w: EventWriter<'w, Connected>,
+    disconnected_w: EventWriter<'w, Disconnected>,
+}
+
 /// the event handler for updating endpoints in bevy
 struct Handler<'a, 'w, 's, E: Endpoint> {
+    params: &'a mut HandlerParams<'w, 's>,
     accept_inoming: bool,
-    commands: &'a mut Commands<'w, 's>,
-    connected_w: &'a mut EventWriter<'w, Connected>,
-    disconnected_w: &'a mut EventWriter<'w, Disconnected>,
     endpoint_entity: Entity,
     connections: &'a mut HashMap<E::ConnectionId, Entity>,
 }
 
 impl<'a, 'w, 's, E: Endpoint> EndpointEventHandler<E> for Handler<'a, 'w, 's, E>
 where
+    E: 'static,
     E::ConnectionId: Send + Sync,
 {
     fn connection_request<'i>(
@@ -184,13 +205,14 @@ where
             .connections
             .entry(connection_id.clone())
             .or_insert_with(|| {
-                self.commands
-                    .spawn(BevyConnection::<E>::new(connection_id))
+                self.params
+                    .commands
+                    .spawn((BevyConnectionState::<E>::new(connection_id), BevyConnection))
                     .set_parent(self.endpoint_entity)
                     .id()
             });
 
-        self.connected_w.send(Connected {
+        self.params.connected_w.send(Connected {
             endpoint_entity: self.endpoint_entity,
             connection_entity,
         });
@@ -198,7 +220,7 @@ where
 
     fn disconnected(&mut self, connection_id: <E as Endpoint>::ConnectionId) {
         if let Some(connection_entity) = self.connections.remove(&connection_id) {
-            self.disconnected_w.send(Disconnected {
+            self.params.disconnected_w.send(Disconnected {
                 endpoint_entity: self.endpoint_entity,
                 connection_entity,
             });
@@ -207,19 +229,16 @@ where
 }
 
 pub(crate) fn update_endpoints<E: Endpoint + Send + Sync + 'static>(
-    mut commands: Commands,
+    mut params: HandlerParams,
     mut endpoint_q: Query<(Entity, &mut BevyEndpointState<E>)>,
-    mut connected_w: EventWriter<Connected>,
-    mut disconnected_w: EventWriter<Disconnected>,
 ) where
     E::ConnectionId: Send + Sync,
 {
     for (endpoint_entity, mut endpoint) in endpoint_q.iter_mut() {
+        let endpoint = endpoint.as_mut();
         endpoint.endpoint.update(&mut Handler {
+            params: &mut params,
             accept_inoming: true, // TODO: add api
-            commands: &mut commands,
-            connected_w: &mut connected_w,
-            disconnected_w: &mut disconnected_w,
             endpoint_entity,
             connections: &mut endpoint.connections,
         });
