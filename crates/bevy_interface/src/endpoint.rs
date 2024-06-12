@@ -76,6 +76,7 @@ struct UpdateHandler<'a, 'w, 's, E: Endpoint> {
 pub struct Connections<'w, 's> {
     commands: Commands<'w, 's>,
     endpoint_q: Query<'w, 's, &'static mut BevyEndpoint>,
+    connection_q: Query<'w, 's, &'static Parent, With<BevyConnection>>,
 }
 
 impl BevyEndpoint {
@@ -189,6 +190,10 @@ impl<C: std::hash::Hash + Eq + Copy> ConnectionMap<C> {
 
         Some(entity)
     }
+
+    fn get_connection_id(&self, entity: Entity) -> Option<C> {
+        self.connection_ids.get(&entity).copied()
+    }
 }
 
 impl<'a, 'w, 's, E: Endpoint> EndpointEventHandler<E> for UpdateHandler<'a, 'w, 's, E>
@@ -264,6 +269,28 @@ impl<'w, 's> Connections<'w, 's> {
             .state
             .connect(&mut self.commands, endpoint_entity, Box::new(connect_info))
             .map_err(|err| ConnectError::MismatchedEndpointType(err))
+    }
+
+    /// gets the [BevyEndpoint] component of a connection's parent mutably
+    pub fn connection_endpoint_mut(
+        &mut self,
+        connection_entity: Entity,
+    ) -> Option<Mut<BevyEndpoint>> {
+        let Ok(parent) = self.connection_q.get(connection_entity) else {
+            return None;
+        };
+
+        let connection_parent = parent.get();
+
+        let Ok(endpoint) = self.endpoint_q.get_mut(connection_parent) else {
+            error!(
+                "connection entity {:?}'s parent {:?} wasn't an endpoint",
+                connection_entity, connection_parent
+            );
+            return None;
+        };
+
+        Some(endpoint)
     }
 }
 

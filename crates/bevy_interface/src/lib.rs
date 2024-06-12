@@ -1,7 +1,7 @@
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*, utils::intern::Interned};
 
+pub mod connections;
 pub mod endpoint;
-pub mod streams;
 
 pub mod prelude {
     pub use crate::endpoint::{
