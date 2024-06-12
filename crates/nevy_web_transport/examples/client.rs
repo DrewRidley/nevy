@@ -27,7 +27,7 @@ fn main() {
         .connect((
             quinn_config,
             "127.0.0.1:443".parse().unwrap(),
-            "dev.drewridley.com",
+            "dev.drewridley.com".into(),
         ))
         .unwrap();
 

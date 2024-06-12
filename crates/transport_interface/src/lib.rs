@@ -15,7 +15,7 @@ pub trait Endpoint {
     /// so that it can be used reasonably in generic contexts
     type ConnectionId: std::hash::Hash + Eq + Copy;
 
-    type ConnectInfo<'a>;
+    type ConnectInfo;
 
     type IncomingConnectionInfo<'i>;
 
@@ -33,9 +33,9 @@ pub trait Endpoint {
     fn connection_mut<'a>(&'a mut self, id: Self::ConnectionId) -> Option<Self::Connection<'a>>;
 
     /// creates a connection described by `info`
-    fn connect<'c, 'a>(
+    fn connect<'c>(
         &'c mut self,
-        info: Self::ConnectInfo<'a>,
+        info: Self::ConnectInfo,
     ) -> Option<(Self::ConnectionId, Self::Connection<'c>)>;
 
     /// Closes a connection matching the provided id.

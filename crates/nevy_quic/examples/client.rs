@@ -26,7 +26,7 @@ fn main() {
         .connect((
             quinn_client_config,
             "127.0.0.1:27018".parse().unwrap(),
-            "dev.drewridley.com",
+            "dev.drewridley.com".into(),
         ))
         .unwrap();
 

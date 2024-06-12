@@ -13,7 +13,7 @@ fn main() {
         ..default()
     });
 
-    app.add_plugins(EndpointPlugin::<QuinnEndpoint>::default());
+    app.add_plugins(EndpointPlugin::default());
 
     app.add_systems(Startup, spawn_endpoint);
     app.add_systems(Update, log_events);
@@ -72,8 +72,14 @@ fn spawn_endpoint(mut commands: Commands) {
     let endpoint =
         QuinnEndpoint::new("0.0.0.0:27018".parse().unwrap(), None, Some(server_config)).unwrap();
 
-    commands.spawn((ExampleEndpoint, BevyEndpointState::new(endpoint)));
+    commands.spawn((ExampleEndpoint, BevyEndpoint::new(endpoint)));
 }
+
+// fn connect(endpoint_q: Query<Entity, With<ExampleEndpoint>>, mut connections: Connections) {
+//     let endpoint_entity = endpoint_q.single();
+
+//     connections.connect(endpoint_entity, ())
+// }
 
 fn log_events(
     mut connected_r: EventReader<Connected>,

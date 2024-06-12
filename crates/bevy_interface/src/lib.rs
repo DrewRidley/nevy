@@ -1,57 +1,42 @@
-use std::marker::PhantomData;
-
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*, utils::intern::Interned};
-use transport_interface::*;
 
-pub mod connection;
 pub mod endpoint;
 pub mod streams;
 
 pub mod prelude {
-    pub use crate::connection::BevyConnectionState;
-    pub use crate::endpoint::{BevyEndpointState, Connections};
+    pub use crate::endpoint::{
+        BevyConnection, BevyEndpoint, ConnectError, Connections, MismatchedEndpointType,
+    };
     pub use crate::{Connected, Disconnected, EndpointPlugin};
 }
 
 /// adds events and update loop for
 /// [BevyEndpoint] and [BevyConnection]
-/// with an endpoint backend `E`
-pub struct EndpointPlugin<E> {
-    _p: PhantomData<E>,
+pub struct EndpointPlugin {
     schedule: Interned<dyn ScheduleLabel>,
 }
 
-impl<E> EndpointPlugin<E> {
+impl EndpointPlugin {
     /// creates a new [EndpointPlugin] that updates in a certain schedule
     fn new(schedule: impl ScheduleLabel) -> Self {
         EndpointPlugin {
-            _p: PhantomData,
             schedule: schedule.intern(),
         }
     }
 }
 
-impl<E> Default for EndpointPlugin<E> {
+impl Default for EndpointPlugin {
     fn default() -> Self {
         EndpointPlugin::new(PreUpdate)
     }
 }
 
-impl<E: Endpoint + Send + Sync + 'static> Plugin for EndpointPlugin<E>
-where
-    E::ConnectionId: Send + Sync,
-{
+impl Plugin for EndpointPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<Connected>();
         app.add_event::<Disconnected>();
 
-        app.add_systems(
-            self.schedule,
-            (
-                endpoint::insert_missing_bevy_endpoints::<E>,
-                endpoint::update_endpoints::<E>,
-            ),
-        );
+        app.add_systems(self.schedule, endpoint::update_endpoints);
     }
 }
 
