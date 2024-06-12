@@ -111,7 +111,7 @@ impl<'c> WebTransportConnectionMut<'c> {
             stream_id,
             peer_generated,
             event_type,
-        }) = self.quinn.poll_stream_events::<QuinnStreamId>()
+        }) = self.quinn.poll_stream_events()
         {
             match event_type {
                 StreamEventType::NewSendStream => {
@@ -204,7 +204,7 @@ impl<'c> WebTransportConnectionMut<'c> {
         match &mut self.web_transport.state {
             ConnectionState::Unconnected => (),
             ConnectionState::ClientSendSettings(stream_id, buffer) => {
-                let mut stream = self.quinn.send_stream_mut(*stream_id).unwrap();
+                let mut stream = self.quinn.send_stream(*stream_id).unwrap();
                 while let Ok(n) = stream.send(buffer) {
                     if n == 0 {
                         break;
@@ -219,7 +219,7 @@ impl<'c> WebTransportConnectionMut<'c> {
             }
             ConnectionState::ClientWaitSettingsResponse => (),
             ConnectionState::ClientReceiveSettingsResponse(stream_id, buffer) => {
-                let stream = self.quinn.recv_stream_mut(*stream_id).unwrap();
+                let stream = self.quinn.recv_stream(*stream_id).unwrap();
                 match read_settings(stream, buffer) {
                     ReadResult::Wait => (),
                     ReadResult::Fail => self.fail(),
@@ -245,7 +245,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                 }
             }
             ConnectionState::ClientSendConnect(stream_id, buffer) => {
-                let mut stream = self.quinn.send_stream_mut(*stream_id).unwrap();
+                let mut stream = self.quinn.send_stream(*stream_id).unwrap();
                 while let Ok(n) = stream.send(buffer) {
                     if n == 0 {
                         break;
@@ -264,7 +264,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                 }
             }
             ConnectionState::ClientReceiveConnectResponse(stream_id, buffer) => {
-                let stream = self.quinn.recv_stream_mut(*stream_id).unwrap();
+                let stream = self.quinn.recv_stream(*stream_id).unwrap();
                 match read_connect_response(stream, buffer) {
                     ReadResult::Wait => (),
                     ReadResult::Fail => self.fail(),
@@ -275,7 +275,7 @@ impl<'c> WebTransportConnectionMut<'c> {
             // Server states.
             ConnectionState::ServerWaitSettingStream => (),
             ConnectionState::ServerReadSettings(stream_id, buffer) => {
-                let stream = self.quinn.recv_stream_mut(*stream_id).unwrap();
+                let stream = self.quinn.recv_stream(*stream_id).unwrap();
                 match read_settings(stream, buffer) {
                     ReadResult::Wait => (),
                     ReadResult::Fail => self.fail(),
@@ -299,7 +299,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                 }
             }
             ConnectionState::ServerSendSettingsResponse(stream_id, buffer) => {
-                let mut stream = self.quinn.send_stream_mut(*stream_id).unwrap();
+                let mut stream = self.quinn.send_stream(*stream_id).unwrap();
                 while let Ok(n) = stream.send(buffer) {
                     if n == 0 {
                         break;
@@ -314,7 +314,7 @@ impl<'c> WebTransportConnectionMut<'c> {
             }
             ConnectionState::ServerWaitConnectStream => (),
             ConnectionState::ServerReadConnectRequest(stream_id, buffer) => {
-                let stream = self.quinn.recv_stream_mut(*stream_id).unwrap();
+                let stream = self.quinn.recv_stream(*stream_id).unwrap();
                 match read_connect(stream, buffer) {
                     ReadResult::Wait => (),
                     ReadResult::Fail => self.fail(),
@@ -335,7 +335,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                 }
             }
             ConnectionState::ServerSendConnectResponse(stream_id, buffer) => {
-                let mut stream = self.quinn.send_stream_mut(*stream_id).unwrap();
+                let mut stream = self.quinn.send_stream(*stream_id).unwrap();
                 while let Ok(n) = stream.send(buffer) {
                     if n == 0 {
                         break;
@@ -357,6 +357,8 @@ impl<'c> ConnectionMut<'c> for WebTransportConnectionMut<'c> {
     type NonMut<'b> = WebTransportConnectionRef<'b>
     where
         Self: 'b;
+
+    type StreamType = WebTransportStreamId;
 
     fn as_ref<'b>(&'b self) -> Self::NonMut<'b> {
         WebTransportConnectionRef { quinn: self.quinn }

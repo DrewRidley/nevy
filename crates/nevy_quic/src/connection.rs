@@ -88,6 +88,8 @@ impl QuinnConnection {
 impl<'c> ConnectionMut<'c> for &'c mut QuinnConnection {
     type NonMut<'b> = &'b QuinnConnection where Self: 'b;
 
+    type StreamType = QuinnStreamId;
+
     fn as_ref<'b>(&'b self) -> Self::NonMut<'b> {
         self
     }

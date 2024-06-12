@@ -62,7 +62,7 @@ fn main() {
         impl<'a> EndpointEventHandler<WebTransportEndpoint> for Handler<'a> {
             fn connection_request<'i>(
                 &mut self,
-                request: <WebTransportEndpoint as Endpoint>::IncomingConnectionInfo<'i>,
+                _request: <WebTransportEndpoint as Endpoint>::IncomingConnectionInfo<'i>,
             ) -> bool {
                 true
             }
@@ -95,7 +95,7 @@ fn main() {
                 stream_id,
                 event_type,
                 ..
-            }) = connection.poll_stream_events::<WebTransportStreamId>()
+            }) = connection.poll_stream_events()
             {
                 match event_type {
                     StreamEventType::NewRecvStream => {
@@ -110,11 +110,7 @@ fn main() {
             }
 
             for (&stream_id, stream) in streams.iter_mut() {
-                if let Ok(bytes) = connection
-                    .recv_stream_mut(stream_id)
-                    .unwrap()
-                    .recv(usize::MAX)
-                {
+                if let Ok(bytes) = connection.recv_stream(stream_id).unwrap().recv(usize::MAX) {
                     stream.extend(bytes.as_ref());
                 }
             }

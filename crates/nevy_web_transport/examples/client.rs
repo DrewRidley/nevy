@@ -71,7 +71,7 @@ fn main() {
 
             let stream_id: WebTransportStreamId =
                 connection.open_stream(quinn_proto::Dir::Uni).unwrap();
-            let mut stream = connection.send_stream_mut(stream_id).unwrap();
+            let mut stream = connection.send_stream(stream_id).unwrap();
             stream.send(&[1, 2, 3, 4]).unwrap();
             stream.close(None).unwrap();
         }

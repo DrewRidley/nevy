@@ -23,27 +23,15 @@ pub struct WebTransportSendStreamMut<'s> {
     stream: QuinnSendStreamMut<'s>,
 }
 
-pub struct WebTransportSendStreamRef;
-
 pub struct WebTransportRecvStreamMut<'s> {
     state: &'s mut WebTransportRecvStream,
     stream: QuinnRecvStreamMut<'s>,
 }
 
-pub struct WebTransportRecvStreamRef;
-
 impl<'s> SendStreamMut<'s> for WebTransportSendStreamMut<'s> {
-    type NonMut<'b> = WebTransportSendStreamRef
-    where
-        Self: 'b;
-
     type SendError = QuinnSendError;
 
     type CloseDescription = Option<quinn_proto::VarInt>;
-
-    fn as_ref<'b>(&'b self) -> Self::NonMut<'b> {
-        todo!()
-    }
 
     fn send(&mut self, data: &[u8]) -> Result<usize, Self::SendError> {
         if let Some(header) = self.state.header.as_mut() {
@@ -64,20 +52,10 @@ impl<'s> SendStreamMut<'s> for WebTransportSendStreamMut<'s> {
     }
 }
 
-impl<'s> SendStreamRef<'s> for WebTransportSendStreamRef {}
-
 impl<'s> RecvStreamMut<'s> for WebTransportRecvStreamMut<'s> {
-    type NonMut<'b> = WebTransportRecvStreamRef
-    where
-        Self: 'b;
-
     type ReadError = QuinnReadError;
 
     type CloseDescription = quinn_proto::VarInt;
-
-    fn as_ref<'b>(&'b self) -> Self::NonMut<'b> {
-        todo!()
-    }
 
     fn recv(&mut self, limit: usize) -> Result<Box<[u8]>, Self::ReadError> {
         if let Some(header) = self.state.header.as_mut() {
@@ -102,8 +80,6 @@ impl<'s> RecvStreamMut<'s> for WebTransportRecvStreamMut<'s> {
         self.stream.close(description)
     }
 }
-
-impl<'s> RecvStreamRef<'s> for WebTransportRecvStreamRef {}
 
 impl StreamId for WebTransportStreamId {
     type Connection<'c> = WebTransportConnectionMut<'c>;
@@ -162,38 +138,24 @@ impl StreamId for WebTransportStreamId {
         Some(stream_id)
     }
 
-    fn get_send_mut<'c, 's>(
+    fn get_send<'c, 's>(
         self,
         connection: &'s mut WebTransportConnectionMut<'c>,
     ) -> Option<Self::SendMut<'s>> {
         Some(WebTransportSendStreamMut {
             state: connection.web_transport.send_streams.get_mut(&self)?,
-            stream: connection.quinn.send_stream_mut(self.0)?,
+            stream: connection.quinn.send_stream(self.0)?,
         })
     }
 
-    fn get_recv_mut<'c, 's>(
+    fn get_recv<'c, 's>(
         self,
         connection: &'s mut WebTransportConnectionMut<'c>,
     ) -> Option<Self::RecvMut<'s>> {
         Some(WebTransportRecvStreamMut {
             state: connection.web_transport.recv_streams.get_mut(&self)?,
-            stream: connection.quinn.recv_stream_mut(self.0)?,
+            stream: connection.quinn.recv_stream(self.0)?,
         })
-    }
-
-    fn get_send<'c, 's>(
-        self,
-        _connection: &'s WebTransportConnectionRef<'c>,
-    ) -> Option<<Self::SendMut<'s> as SendStreamMut<'s>>::NonMut<'s>> {
-        Some(WebTransportSendStreamRef)
-    }
-
-    fn get_recv<'c, 's>(
-        self,
-        _connection: &'s WebTransportConnectionRef<'c>,
-    ) -> Option<<Self::RecvMut<'s> as RecvStreamMut<'s>>::NonMut<'s>> {
-        Some(WebTransportRecvStreamRef)
     }
 
     fn poll_events<'c>(

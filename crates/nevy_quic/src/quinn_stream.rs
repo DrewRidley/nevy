@@ -18,10 +18,6 @@ pub struct QuinnRecvStreamMut<'s> {
     stream: quinn_proto::RecvStream<'s>,
 }
 
-pub struct QuinnRecvStreamRef;
-
-pub struct QuinnSendStreamRef;
-
 #[derive(Debug)]
 pub enum QuinnSendError {
     /// the stream is blocked because the peer cannot accept more data
@@ -42,17 +38,9 @@ pub enum QuinnReadError {
 }
 
 impl<'s, 'c> SendStreamMut<'s> for QuinnSendStreamMut<'s> {
-    type NonMut<'b> = QuinnSendStreamRef
-    where
-        Self: 'b;
-
     type SendError = QuinnSendError;
 
     type CloseDescription = Option<quinn_proto::VarInt>;
-
-    fn as_ref<'b>(&'b self) -> Self::NonMut<'b> {
-        QuinnSendStreamRef
-    }
 
     fn send(&mut self, data: &[u8]) -> Result<usize, Self::SendError> {
         match self.stream.write(data) {
@@ -71,20 +59,10 @@ impl<'s, 'c> SendStreamMut<'s> for QuinnSendStreamMut<'s> {
     }
 }
 
-impl<'s, 'c> SendStreamRef<'s> for QuinnSendStreamRef {}
-
 impl<'s, 'c> RecvStreamMut<'s> for QuinnRecvStreamMut<'s> {
-    type NonMut<'b> = QuinnRecvStreamRef
-    where
-        Self: 'b;
-
     type ReadError = QuinnReadError;
 
     type CloseDescription = quinn_proto::VarInt;
-
-    fn as_ref<'b>(&'b self) -> Self::NonMut<'b> {
-        QuinnRecvStreamRef
-    }
 
     fn recv(&mut self, limit: usize) -> Result<Box<[u8]>, Self::ReadError> {
         let mut chunks = match self.stream.read(true) {
@@ -120,8 +98,6 @@ impl<'s, 'c> RecvStreamMut<'s> for QuinnRecvStreamMut<'s> {
     }
 }
 
-impl<'s> RecvStreamRef<'s> for QuinnRecvStreamRef {}
-
 impl StreamId for QuinnStreamId {
     type Connection<'c> = &'c mut QuinnConnection;
 
@@ -140,7 +116,7 @@ impl StreamId for QuinnStreamId {
         ))
     }
 
-    fn get_send_mut<'c, 's>(
+    fn get_send<'c, 's>(
         self,
         connection: &'s mut &'c mut QuinnConnection,
     ) -> Option<Self::SendMut<'s>> {
@@ -149,7 +125,7 @@ impl StreamId for QuinnStreamId {
         })
     }
 
-    fn get_recv_mut<'c, 's>(
+    fn get_recv<'c, 's>(
         self,
         connection: &'s mut &'c mut QuinnConnection,
     ) -> Option<Self::RecvMut<'s>> {
@@ -158,20 +134,6 @@ impl StreamId for QuinnStreamId {
             stream_id: self,
             stream: connection.connection.recv_stream(self.0),
         })
-    }
-
-    fn get_send<'c, 's>(
-        self,
-        _connection: &'s &'c QuinnConnection,
-    ) -> Option<<Self::SendMut<'s> as SendStreamMut<'s>>::NonMut<'s>> {
-        Some(QuinnSendStreamRef)
-    }
-
-    fn get_recv<'c, 's>(
-        self,
-        _connection: &'s &'c QuinnConnection,
-    ) -> Option<<Self::RecvMut<'s> as RecvStreamMut<'s>>::NonMut<'s>> {
-        Some(QuinnRecvStreamRef)
     }
 
     fn poll_events<'c>(connection: &mut &'c mut QuinnConnection) -> Option<StreamEvent<Self>> {
