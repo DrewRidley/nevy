@@ -3,7 +3,7 @@ use std::any::Any;
 use bevy::{prelude::*, utils::HashMap};
 use transport_interface::*;
 
-use crate::{Connected, Disconnected};
+use crate::{connections::BevyConnectionMut, Connected, Disconnected};
 
 /// the component that holds state and represents a networking endpoint
 ///
@@ -27,6 +27,9 @@ trait BevyEndpointType: Send + Sync {
         endpoint_entity: Entity,
         connect_info: Box<dyn Any>,
     ) -> Result<Option<Entity>, MismatchedEndpointType>;
+
+    fn connection_mut<'c>(&'c mut self, connection_entity: Entity)
+        -> Option<BevyConnectionMut<'c>>;
 }
 
 struct BevyEndpointState<E: Endpoint>
@@ -92,6 +95,10 @@ impl BevyEndpoint {
             }),
         }
     }
+
+    pub fn connection_mut(&mut self, connection_entity: Entity) -> Option<BevyConnectionMut> {
+        self.state.connection_mut(connection_entity)
+    }
 }
 
 impl<E: Endpoint> BevyEndpointType for BevyEndpointState<E>
@@ -142,6 +149,21 @@ where
         }
 
         Ok(Some(entity))
+    }
+
+    fn connection_mut<'c>(
+        &'c mut self,
+        connection_entity: Entity,
+    ) -> Option<BevyConnectionMut<'c>> {
+        let connection_id = self.connections.get_connection_id(connection_entity)?;
+
+        let Some(connection_mut) = self.endpoint.connection_mut(connection_id) else {
+            return None;
+        };
+
+        let connection_mut = BevyConnectionMut::new(connection_mut);
+
+        Some(connection_mut)
     }
 }
 

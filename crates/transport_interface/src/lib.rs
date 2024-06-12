@@ -94,12 +94,11 @@ pub trait ConnectionMut<'c> {
     }
 
     /// opens a stream for stream id type `S`
-    fn open_stream<S>(&mut self, description: S::OpenDescription) -> Option<S>
-    where
-        S: StreamId<Connection<'c> = Self>,
-        S: 'c,
-    {
-        S::open(self, description)
+    fn open_stream(
+        &mut self,
+        description: <Self::StreamType as StreamId>::OpenDescription,
+    ) -> Option<Self::StreamType> {
+        Self::StreamType::open(self, description)
     }
 
     /// get a send stream mutably with type `S`
@@ -132,7 +131,7 @@ pub trait ConnectionRef<'c> {
 }
 
 /// contains methods to operate on a stream type
-pub trait StreamId {
+pub trait StreamId: 'static {
     /// the mutable connection reference of this stream id
     type Connection<'c>: ConnectionMut<'c>
     where
@@ -149,7 +148,7 @@ pub trait StreamId {
         Self: 's;
 
     /// description of a stream when opening
-    type OpenDescription;
+    type OpenDescription: 'static;
 
     /// opens a stream
     ///
