@@ -2,7 +2,7 @@ use std::{io::Read, sync::Arc, time::Duration};
 
 use bevy::prelude::*;
 use bevy_interface::prelude::*;
-use nevy_quic::prelude::*;
+use nevy_quic::{prelude::*, quinn_proto::crypto::rustls::QuicClientConfig};
 
 fn main() {
     let mut app = App::new();
@@ -15,7 +15,7 @@ fn main() {
 
     app.add_plugins(EndpointPlugin::default());
 
-    app.add_systems(Startup, spawn_endpoint);
+    app.add_systems(Startup, (spawn_endpoint, apply_deferred, connect).chain());
     app.add_systems(Update, log_events);
 
     app.run()
@@ -70,9 +70,42 @@ fn spawn_endpoint(mut commands: Commands) {
     server_config.transport = Arc::new(transport_config);
 
     let endpoint =
-        QuinnEndpoint::new("0.0.0.0:27018".parse().unwrap(), None, Some(server_config)).unwrap();
+        QuinnEndpoint::new("0.0.0.0:0".parse().unwrap(), None, Some(server_config)).unwrap();
 
     commands.spawn((ExampleEndpoint, BevyEndpoint::new(endpoint)));
+}
+
+fn connect(endpoint_q: Query<Entity, With<ExampleEndpoint>>, mut connections: Connections) {
+    let endpoint_entity = endpoint_q.single();
+
+    let mut config = rustls_platform_verifier::tls_config_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .unwrap();
+    config.alpn_protocols = vec![b"h3".to_vec()];
+
+    let quic_config: QuicClientConfig = config.try_into().unwrap();
+    let mut quinn_client_config = nevy_quic::quinn_proto::ClientConfig::new(Arc::new(quic_config));
+
+    let mut transport_config = nevy_quic::quinn_proto::TransportConfig::default();
+    transport_config.max_idle_timeout(Some(Duration::from_secs(10).try_into().unwrap()));
+    transport_config.keep_alive_interval(Some(Duration::from_millis(200)));
+
+    quinn_client_config.transport_config(Arc::new(transport_config));
+
+    let connection_entity = connections
+        .connect::<QuinnEndpoint>(
+            endpoint_entity,
+            (
+                quinn_client_config,
+                "127.0.0.1:27018".parse().unwrap(),
+                "dev.drewridley.com".into(),
+            ),
+        )
+        .unwrap()
+        .unwrap();
+
+    info!("connected: {:?}", connection_entity);
 }
 
 fn log_events(

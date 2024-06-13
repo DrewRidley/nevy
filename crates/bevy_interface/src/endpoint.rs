@@ -216,6 +216,10 @@ impl<C: std::hash::Hash + Eq + Copy> ConnectionMap<C> {
     fn get_connection_id(&self, entity: Entity) -> Option<C> {
         self.connection_ids.get(&entity).copied()
     }
+
+    fn get_connection_entity(&self, connection_id: C) -> Option<Entity> {
+        self.connection_entities.get(&connection_id).copied()
+    }
 }
 
 impl<'a, 'w, 's, E: Endpoint> EndpointEventHandler<E> for UpdateHandler<'a, 'w, 's, E>
@@ -230,20 +234,21 @@ where
     }
 
     fn connected(&mut self, connection_id: <E as Endpoint>::ConnectionId) {
-        let connection_entity = self
-            .params
-            .commands
-            .spawn(BevyConnection)
-            .set_parent(self.endpoint_entity)
-            .id();
+        let connection_entity = match self.connections.get_connection_entity(connection_id) {
+            Some(connection_entity) => connection_entity,
+            None => {
+                let connection_entity = self
+                    .params
+                    .commands
+                    .spawn(BevyConnection)
+                    .set_parent(self.endpoint_entity)
+                    .id();
 
-        if self.connections.insert(connection_id, connection_entity) {
-            panic!(
-                "got duplicate connection id from endpoint {:?} \"{}\"",
-                self.endpoint_entity,
-                std::any::type_name::<E>()
-            );
-        }
+                self.connections.insert(connection_id, connection_entity);
+
+                connection_entity
+            }
+        };
 
         self.params.connected_w.send(Connected {
             endpoint_entity: self.endpoint_entity,

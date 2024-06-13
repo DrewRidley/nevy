@@ -262,10 +262,6 @@ impl QuinnEndpoint {
 
             connection.accept_streams();
 
-            if drained {
-                println!("Freed connection");
-            }
-
             !drained
         });
     }

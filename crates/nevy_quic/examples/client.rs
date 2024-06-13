@@ -1,7 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
 use nevy_quic::prelude::*;
-use quinn_proto::crypto::rustls::QuicClientConfig;
 use transport_interface::*;
 
 fn main() {
@@ -13,10 +12,11 @@ fn main() {
     .unwrap();
     config.alpn_protocols = vec![b"h3".to_vec()];
 
-    let quic_config: QuicClientConfig = config.try_into().unwrap();
-    let mut quinn_client_config = quinn_proto::ClientConfig::new(Arc::new(quic_config));
+    let quic_config: nevy_quic::quinn_proto::crypto::rustls::QuicClientConfig =
+        config.try_into().unwrap();
+    let mut quinn_client_config = nevy_quic::quinn_proto::ClientConfig::new(Arc::new(quic_config));
 
-    let mut transport_config = quinn_proto::TransportConfig::default();
+    let mut transport_config = nevy_quic::quinn_proto::TransportConfig::default();
     transport_config.max_idle_timeout(Some(Duration::from_secs(10).try_into().unwrap()));
     transport_config.keep_alive_interval(Some(Duration::from_millis(200)));
 
@@ -62,7 +62,9 @@ fn main() {
         for connection_id in handler.connections {
             let mut connection = endpoint.connection_mut(connection_id).unwrap();
 
-            let stream_id: QuinnStreamId = connection.open_stream(quinn_proto::Dir::Uni).unwrap();
+            let stream_id: QuinnStreamId = connection
+                .open_stream(nevy_quic::quinn_proto::Dir::Uni)
+                .unwrap();
             let mut stream = connection.send_stream(stream_id).unwrap();
             stream.send(&[1, 2, 3, 4]).unwrap();
             stream.close(None).unwrap();
