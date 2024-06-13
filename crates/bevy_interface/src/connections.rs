@@ -14,7 +14,10 @@ pub(crate) trait BevyConnectionInner<'c> {
         creator: StreamDescription,
     ) -> Result<Option<BevyStreamId>, MismatchedStreamType>;
 
-    fn send_stream_mut(&mut self, id: BevyStreamId) -> Result<Option<BevySendStream>, MismatchedStreamType>
+    fn send_stream_mut(
+        &mut self,
+        id: BevyStreamId,
+    ) -> Result<Option<BevySendStream>, MismatchedStreamType>;
 }
 
 pub struct BevyConnectionMut<'c> {
@@ -45,7 +48,10 @@ impl<'c, C: ConnectionMut<'c>> BevyConnectionInner<'c> for C {
         }))
     }
 
-    fn send_stream_mut(&mut self, id: BevyStreamId) -> Result<Option<BevySendStream>, MismatchedStreamType> {
+    fn send_stream_mut(
+        &mut self,
+        id: BevyStreamId,
+    ) -> Result<Option<BevySendStream>, MismatchedStreamType> {
         todo!()
     }
 }
@@ -150,7 +156,7 @@ impl<S: StreamId> BevyStreamIdInner for S {
 impl Clone for BevyStreamId {
     fn clone(&self) -> Self {
         BevyStreamId {
-            inner: self.inner.clone_inner()
+            inner: self.inner.clone_inner(),
         }
     }
 }
