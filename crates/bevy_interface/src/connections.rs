@@ -3,7 +3,7 @@ use std::any::Any;
 use transport_interface::*;
 
 #[derive(Debug)]
-pub struct MismatchedType {
+pub struct MismatchedStreamType {
     pub expected: &'static str,
     pub actual: &'static str,
 }
@@ -11,8 +11,10 @@ pub struct MismatchedType {
 pub(crate) trait BevyConnectionInner<'c> {
     fn open_stream(
         &mut self,
-        creator: StreamCreator,
-    ) -> Result<Option<BevyStreamId>, MismatchedType>;
+        creator: StreamDescription,
+    ) -> Result<Option<BevyStreamId>, MismatchedStreamType>;
+
+    fn send_stream_mut(&mut self, id: BevyStreamId) -> Result<Option<BevySendStream>, MismatchedStreamType>
 }
 
 pub struct BevyConnectionMut<'c> {
@@ -22,12 +24,12 @@ pub struct BevyConnectionMut<'c> {
 impl<'c, C: ConnectionMut<'c>> BevyConnectionInner<'c> for C {
     fn open_stream(
         &mut self,
-        creator: StreamCreator,
-    ) -> Result<Option<BevyStreamId>, MismatchedType> {
+        creator: StreamDescription,
+    ) -> Result<Option<BevyStreamId>, MismatchedStreamType> {
         let description = match creator.description.downcast() {
             Ok(description) => *description,
             Err(description) => {
-                return Err(MismatchedType {
+                return Err(MismatchedStreamType {
                     expected: std::any::type_name::<<C::StreamType as StreamId>::OpenDescription>(),
                     actual: std::any::type_name_of_val(&*description),
                 })
@@ -42,6 +44,10 @@ impl<'c, C: ConnectionMut<'c>> BevyConnectionInner<'c> for C {
             inner: Box::new(stream_id),
         }))
     }
+
+    fn send_stream_mut(&mut self, id: BevyStreamId) -> Result<Option<BevySendStream>, MismatchedStreamType> {
+        todo!()
+    }
 }
 
 impl<'c> BevyConnectionMut<'c> {
@@ -53,22 +59,22 @@ impl<'c> BevyConnectionMut<'c> {
 
     pub fn open_stream(
         &mut self,
-        creator: StreamCreator,
-    ) -> Result<Option<BevyStreamId>, MismatchedType> {
+        creator: StreamDescription,
+    ) -> Result<Option<BevyStreamId>, MismatchedStreamType> {
         self.inner.open_stream(creator)
     }
 }
 
-pub struct StreamCreator {
+pub struct StreamDescription {
     description: Box<dyn Any>,
 }
 
-impl StreamCreator {
+impl StreamDescription {
     pub fn new<S: StreamId>(description: S::OpenDescription) -> Self
     where
         S::OpenDescription: 'static,
     {
-        StreamCreator {
+        StreamDescription {
             description: Box::new(description),
         }
     }
@@ -80,7 +86,7 @@ trait CloneableDescription {
     fn into_any(self: Box<Self>) -> Box<dyn Any>;
 }
 
-pub struct CloneableStreamCreator {
+pub struct CloneableStreamDescription {
     description: Box<dyn CloneableDescription>,
 }
 
@@ -94,33 +100,63 @@ impl<T: Clone + 'static> CloneableDescription for T {
     }
 }
 
-impl Clone for CloneableStreamCreator {
+impl Clone for CloneableStreamDescription {
     fn clone(&self) -> Self {
-        CloneableStreamCreator {
+        CloneableStreamDescription {
             description: self.description.clone(),
         }
     }
 }
 
-impl From<CloneableStreamCreator> for StreamCreator {
-    fn from(value: CloneableStreamCreator) -> Self {
-        StreamCreator {
+impl From<CloneableStreamDescription> for StreamDescription {
+    fn from(value: CloneableStreamDescription) -> Self {
+        StreamDescription {
             description: value.description.into_any(),
         }
     }
 }
 
-impl CloneableStreamCreator {
+impl CloneableStreamDescription {
     pub fn new<S: StreamId>(description: S::OpenDescription) -> Self
     where
         S::OpenDescription: Clone + 'static,
     {
-        CloneableStreamCreator {
+        CloneableStreamDescription {
             description: Box::new(description),
         }
     }
 }
 
+trait BevyStreamIdInner {
+    fn into_any(self: Box<Self>) -> Box<dyn Any>;
+
+    fn clone_inner(&self) -> Box<dyn BevyStreamIdInner>;
+}
+
 pub struct BevyStreamId {
-    inner: Box<dyn Any>,
+    inner: Box<dyn BevyStreamIdInner>,
+}
+
+impl<S: StreamId> BevyStreamIdInner for S {
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+
+    fn clone_inner(&self) -> Box<dyn BevyStreamIdInner> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for BevyStreamId {
+    fn clone(&self) -> Self {
+        BevyStreamId {
+            inner: self.inner.clone_inner()
+        }
+    }
+}
+
+trait BevySendStreamInner<'s> {}
+
+pub struct BevySendStream<'s> {
+    inner: Box<dyn BevySendStreamInner<'s> + 's>,
 }

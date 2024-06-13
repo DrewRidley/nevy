@@ -16,13 +16,16 @@ fn main() {
     app.add_plugins(EndpointPlugin::default());
 
     app.add_systems(Startup, (spawn_endpoint, apply_deferred, connect).chain());
-    app.add_systems(Update, log_events);
+    app.add_systems(Update, (log_events, send_message));
 
     app.run()
 }
 
 #[derive(Component)]
 struct ExampleEndpoint;
+
+#[derive(Component)]
+struct ExampleConnection;
 
 fn load_certs() -> rustls::ServerConfig {
     let chain = std::fs::File::open("fullchain.pem").expect("failed to open cert file");
@@ -75,7 +78,11 @@ fn spawn_endpoint(mut commands: Commands) {
     commands.spawn((ExampleEndpoint, BevyEndpoint::new(endpoint)));
 }
 
-fn connect(endpoint_q: Query<Entity, With<ExampleEndpoint>>, mut connections: Connections) {
+fn connect(
+    mut commands: Commands,
+    endpoint_q: Query<Entity, With<ExampleEndpoint>>,
+    mut connections: Connections,
+) {
     let endpoint_entity = endpoint_q.single();
 
     let mut config = rustls_platform_verifier::tls_config_with_provider(Arc::new(
@@ -105,7 +112,38 @@ fn connect(endpoint_q: Query<Entity, With<ExampleEndpoint>>, mut connections: Co
         .unwrap()
         .unwrap();
 
+    commands.entity(connection_entity).insert(ExampleConnection);
+
     info!("connected: {:?}", connection_entity);
+}
+
+fn send_message(
+    mut connected_r: EventReader<Connected>,
+    endpoint_q: Query<(), With<ExampleEndpoint>>,
+    mut connections: Connections,
+) {
+    for &Connected {
+        endpoint_entity,
+        connection_entity,
+    } in connected_r.read()
+    {
+        if endpoint_q.contains(endpoint_entity) {
+            let mut endpoint = connections
+                .connection_endpoint_mut(connection_entity)
+                .unwrap();
+
+            let mut connection = endpoint.connection_mut(connection_entity).unwrap();
+
+            let stream_id = connection
+                .open_stream(StreamDescription::new::<QuinnStreamId>(
+                    nevy_quic::quinn_proto::Dir::Uni,
+                ))
+                .unwrap()
+                .unwrap();
+
+            debug!("Opened stream");
+        }
+    }
 }
 
 fn log_events(

@@ -4,6 +4,7 @@ pub mod connections;
 pub mod endpoint;
 
 pub mod prelude {
+    pub use crate::connections::{BevyStreamId, MismatchedStreamType, StreamDescription};
     pub use crate::endpoint::{
         BevyConnection, BevyEndpoint, ConnectError, Connections, MismatchedEndpointType,
     };

@@ -131,7 +131,7 @@ pub trait ConnectionRef<'c> {
 }
 
 /// contains methods to operate on a stream type
-pub trait StreamId: 'static {
+pub trait StreamId: std::hash::Hash + Eq + Copy + 'static {
     /// the mutable connection reference of this stream id
     type Connection<'c>: ConnectionMut<'c>
     where
