@@ -16,7 +16,7 @@ fn main() {
     app.add_plugins(EndpointPlugin::default());
 
     app.add_systems(Startup, (spawn_endpoint, apply_deferred, connect).chain());
-    app.add_systems(Update, (log_events, send_message));
+    app.add_systems(Update, (log_events, send_message, send_stream_data));
 
     app.run()
 }
@@ -25,7 +25,11 @@ fn main() {
 struct ExampleEndpoint;
 
 #[derive(Component)]
-struct ExampleConnection;
+struct ExampleStream {
+    connection_entity: Entity,
+    stream_id: BevyStreamId,
+    buffer: Vec<u8>,
+}
 
 fn load_certs() -> rustls::ServerConfig {
     let chain = std::fs::File::open("fullchain.pem").expect("failed to open cert file");
@@ -78,11 +82,7 @@ fn spawn_endpoint(mut commands: Commands) {
     commands.spawn((ExampleEndpoint, BevyEndpoint::new(endpoint)));
 }
 
-fn connect(
-    mut commands: Commands,
-    endpoint_q: Query<Entity, With<ExampleEndpoint>>,
-    mut connections: Connections,
-) {
+fn connect(endpoint_q: Query<Entity, With<ExampleEndpoint>>, mut connections: Connections) {
     let endpoint_entity = endpoint_q.single();
 
     let mut config = rustls_platform_verifier::tls_config_with_provider(Arc::new(
@@ -112,12 +112,11 @@ fn connect(
         .unwrap()
         .unwrap();
 
-    commands.entity(connection_entity).insert(ExampleConnection);
-
     info!("connected: {:?}", connection_entity);
 }
 
 fn send_message(
+    mut commands: Commands,
     mut connected_r: EventReader<Connected>,
     endpoint_q: Query<(), With<ExampleEndpoint>>,
     mut connections: Connections,
@@ -142,6 +141,49 @@ fn send_message(
                 .unwrap();
 
             debug!("Opened stream");
+
+            commands.spawn(ExampleStream {
+                connection_entity,
+                stream_id,
+                buffer: b"Hello Bevy!".into(),
+            });
+        }
+    }
+}
+
+fn send_stream_data(
+    mut commands: Commands,
+    mut stream_q: Query<(Entity, &mut ExampleStream)>,
+    mut connections: Connections,
+) {
+    for (stream_entity, mut stream_queue) in stream_q.iter_mut() {
+        let mut endpoint = connections
+            .connection_endpoint_mut(stream_queue.connection_entity)
+            .unwrap();
+
+        let mut connection = endpoint
+            .connection_mut(stream_queue.connection_entity)
+            .unwrap();
+
+        let mut stream = connection
+            .send_stream(stream_queue.stream_id.clone())
+            .unwrap()
+            .unwrap();
+
+        loop {
+            if stream_queue.buffer.len() == 0 {
+                commands.entity(stream_entity).despawn();
+                break;
+            }
+
+            let sent = stream.send(&stream_queue.buffer).unwrap();
+            if sent == 0 {
+                break;
+            }
+
+            stream_queue.buffer.drain(..sent);
+
+            debug!("sent {} bytes", sent);
         }
     }
 }

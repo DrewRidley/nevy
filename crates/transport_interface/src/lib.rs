@@ -180,9 +180,9 @@ pub trait StreamId: std::hash::Hash + Eq + Copy + 'static {
 
 /// contains operations for a mutable reference to a send stream with lifetime `'s`
 pub trait SendStreamMut<'s> {
-    type SendError;
+    type SendError: 'static;
 
-    type CloseDescription;
+    type CloseDescription: 'static;
 
     fn send(&mut self, data: &[u8]) -> Result<usize, Self::SendError>;
 

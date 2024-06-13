@@ -87,6 +87,7 @@ impl BevyEndpoint {
     where
         E: Send + Sync + 'static,
         E::ConnectionId: Send + Sync,
+        for<'a> <E::Connection<'a> as ConnectionMut<'a>>::StreamType: Send + Sync,
     {
         BevyEndpoint {
             state: Box::new(BevyEndpointState {
@@ -105,6 +106,7 @@ impl<E: Endpoint> BevyEndpointType for BevyEndpointState<E>
 where
     E: Send + Sync + 'static,
     E::ConnectionId: Send + Sync,
+    for<'a> <E::Connection<'a> as ConnectionMut<'a>>::StreamType: Send + Sync,
 {
     fn endpoint_type_name(&self) -> &'static str {
         std::any::type_name::<E>()
