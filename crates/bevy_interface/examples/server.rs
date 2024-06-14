@@ -16,13 +16,20 @@ fn main() {
     app.add_plugins(EndpointPlugin::default());
 
     app.add_systems(Startup, spawn_endpoint);
-    app.add_systems(Update, log_events);
+    app.add_systems(Update, (log_events, spawn_streams, receive_data));
 
     app.run()
 }
 
 #[derive(Component)]
 struct ExampleEndpoint;
+
+#[derive(Component)]
+struct ExampleStream {
+    connection_entity: Entity,
+    stream_id: BevyStreamId,
+    buffer: Vec<u8>,
+}
 
 fn load_certs() -> rustls::ServerConfig {
     let chain = std::fs::File::open("fullchain.pem").expect("failed to open cert file");
@@ -73,6 +80,84 @@ fn spawn_endpoint(mut commands: Commands) {
         QuinnEndpoint::new("0.0.0.0:27018".parse().unwrap(), None, Some(server_config)).unwrap();
 
     commands.spawn((ExampleEndpoint, BevyEndpoint::new(endpoint)));
+}
+
+fn spawn_streams(
+    mut commands: Commands,
+    connection_q: Query<Entity, With<BevyConnection>>,
+    mut connections: Connections,
+) {
+    for connection_entity in connection_q.iter() {
+        let mut endpoint = connections
+            .connection_endpoint_mut(connection_entity)
+            .unwrap();
+
+        let mut connection = endpoint.connection_mut(connection_entity).unwrap();
+
+        while let Some(BevyStreamEvent {
+            stream_id,
+            event_type,
+            ..
+        }) = connection.poll_stream_events()
+        {
+            match event_type {
+                StreamEventType::NewSendStream => (),
+                StreamEventType::ClosedSendStream => (),
+                StreamEventType::NewRecvStream => {
+                    commands
+                        .spawn(ExampleStream {
+                            connection_entity,
+                            stream_id,
+                            buffer: Vec::new(),
+                        })
+                        .set_parent(connection_entity);
+                }
+                StreamEventType::ClosedRecvStream => (),
+            }
+        }
+    }
+}
+
+fn receive_data(
+    mut commands: Commands,
+    mut stream_q: Query<(Entity, &mut ExampleStream)>,
+    mut connections: Connections,
+) {
+    for (stream_entity, mut example_stream) in stream_q.iter_mut() {
+        let mut endpoint = connections
+            .connection_endpoint_mut(example_stream.connection_entity)
+            .unwrap();
+
+        let mut connection = endpoint
+            .connection_mut(example_stream.connection_entity)
+            .unwrap();
+
+        let mut stream = connection
+            .recv_stream(example_stream.stream_id.clone())
+            .unwrap()
+            .unwrap();
+
+        loop {
+            match stream.recv(usize::MAX) {
+                Ok(data) => {
+                    example_stream.buffer.extend(data.as_ref());
+                }
+                Err(err) => {
+                    if err.is_fatal() {
+                        panic!("fatal error reading stream");
+                    }
+
+                    if !stream.is_open() {
+                        info!("message received: {:?}", example_stream.buffer);
+
+                        commands.entity(stream_entity).despawn();
+                    }
+
+                    break;
+                }
+            }
+        }
+    }
 }
 
 fn log_events(

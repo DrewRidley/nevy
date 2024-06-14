@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use transport_interface::*;
 
@@ -11,6 +11,8 @@ pub struct QuinnConnection {
     pub(crate) connection: quinn_proto::Connection,
     pub(crate) connection_id: QuinnConnectionId,
     pub(crate) stream_events: VecDeque<StreamEvent<QuinnStreamId>>,
+    pub(crate) open_send_streams: HashSet<QuinnStreamId>,
+    pub(crate) open_recv_streams: HashSet<QuinnStreamId>,
 }
 
 impl QuinnConnection {
@@ -22,6 +24,8 @@ impl QuinnConnection {
             connection,
             connection_id,
             stream_events: VecDeque::new(),
+            open_send_streams: HashSet::new(),
+            open_recv_streams: HashSet::new(),
         }
     }
 
@@ -59,6 +63,8 @@ impl QuinnConnection {
         while let Some(stream_id) = self.connection.streams().accept(quinn_proto::Dir::Uni) {
             let stream_id = QuinnStreamId(stream_id);
 
+            self.open_recv_streams.insert(stream_id);
+
             self.stream_events.push_back(StreamEvent {
                 stream_id,
                 peer_generated: true,
@@ -68,6 +74,9 @@ impl QuinnConnection {
 
         while let Some(stream_id) = self.connection.streams().accept(quinn_proto::Dir::Bi) {
             let stream_id = QuinnStreamId(stream_id);
+
+            self.open_recv_streams.insert(stream_id);
+            self.open_send_streams.insert(stream_id);
 
             self.stream_events.push_back(StreamEvent {
                 stream_id,

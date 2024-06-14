@@ -1,31 +1,37 @@
-use std::any::Any;
-
 use transport_interface::*;
 
+mod stream_access;
 mod stream_description;
 mod stream_id;
-mod stream_ref;
+pub use stream_access::*;
 pub use stream_description::*;
 pub use stream_id::*;
-pub use stream_ref::*;
 
 #[derive(Debug)]
 pub struct MismatchedStreamType {
     pub expected: &'static str,
 }
 
-pub(crate) trait BevyConnectionInner<'c> {
+trait BevyConnectionInner<'c> {
     fn open_stream(
         &mut self,
         description: StreamDescription,
     ) -> Result<Option<BevyStreamId>, MismatchedStreamType>;
 
-    fn send_stream_mut(
+    fn send_stream(
         &mut self,
         stream_id: BevyStreamId,
     ) -> Result<Option<BevySendStream>, MismatchedStreamType>;
+
+    fn recv_stream(
+        &mut self,
+        stream_id: BevyStreamId,
+    ) -> Result<Option<BevyRecvStream>, MismatchedStreamType>;
+
+    fn poll_stream_events(&mut self) -> Option<BevyStreamEvent>;
 }
 
+/// type erased mutable access to a connection
 pub struct BevyConnectionMut<'c> {
     inner: Box<dyn BevyConnectionInner<'c> + 'c>,
 }
@@ -47,7 +53,7 @@ where
         Ok(Some(BevyStreamId::new(stream_id)))
     }
 
-    fn send_stream_mut(
+    fn send_stream(
         &mut self,
         stream_id: BevyStreamId,
     ) -> Result<Option<BevySendStream>, MismatchedStreamType> {
@@ -57,10 +63,24 @@ where
             return Ok(None);
         };
 
-        // Ok(Some(BevySendStream {
-        //     inner: Box::new(send_stream),
-        // }))
-        todo!();
+        Ok(Some(BevySendStream::new(send_stream)))
+    }
+
+    fn recv_stream(
+        &mut self,
+        stream_id: BevyStreamId,
+    ) -> Result<Option<BevyRecvStream>, MismatchedStreamType> {
+        let stream_id = stream_id.downcast()?;
+
+        let Some(recv_stream) = self.recv_stream(stream_id) else {
+            return Ok(None);
+        };
+
+        Ok(Some(BevyRecvStream::new(recv_stream)))
+    }
+
+    fn poll_stream_events(&mut self) -> Option<BevyStreamEvent> {
+        self.poll_stream_events().map(Into::into)
     }
 }
 
@@ -85,6 +105,34 @@ impl<'c> BevyConnectionMut<'c> {
         &mut self,
         stream_id: BevyStreamId,
     ) -> Result<Option<BevySendStream>, MismatchedStreamType> {
-        self.inner.send_stream_mut(stream_id)
+        self.inner.send_stream(stream_id)
+    }
+
+    pub fn recv_stream(
+        &mut self,
+        stream_id: BevyStreamId,
+    ) -> Result<Option<BevyRecvStream>, MismatchedStreamType> {
+        self.inner.recv_stream(stream_id)
+    }
+
+    pub fn poll_stream_events(&mut self) -> Option<BevyStreamEvent> {
+        self.inner.poll_stream_events()
+    }
+}
+
+/// type erased stream event
+pub struct BevyStreamEvent {
+    pub stream_id: BevyStreamId,
+    pub peer_generated: bool,
+    pub event_type: StreamEventType,
+}
+
+impl<S: BevyStreamIdInner> From<StreamEvent<S>> for BevyStreamEvent {
+    fn from(value: StreamEvent<S>) -> Self {
+        BevyStreamEvent {
+            stream_id: BevyStreamId::new(value.stream_id),
+            peer_generated: value.peer_generated,
+            event_type: value.event_type,
+        }
     }
 }

@@ -3,7 +3,7 @@ use nevy_quic::prelude::*;
 use transport_interface::*;
 use web_transport_proto::Frame;
 
-use crate::connection::{WebTransportConnectionMut, WebTransportConnectionRef};
+use crate::connection::WebTransportConnectionMut;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct WebTransportStreamId(pub(crate) QuinnStreamId);
@@ -50,6 +50,10 @@ impl<'s> SendStreamMut<'s> for WebTransportSendStreamMut<'s> {
     fn close(&mut self, description: Self::CloseDescription) -> Result<(), ()> {
         self.stream.close(description)
     }
+
+    fn is_open(&self) -> bool {
+        self.stream.is_open()
+    }
 }
 
 impl<'s> RecvStreamMut<'s> for WebTransportRecvStreamMut<'s> {
@@ -78,6 +82,10 @@ impl<'s> RecvStreamMut<'s> for WebTransportRecvStreamMut<'s> {
 
     fn close(&mut self, description: Self::CloseDescription) -> Result<(), ()> {
         self.stream.close(description)
+    }
+
+    fn is_open(&self) -> bool {
+        self.stream.is_open()
     }
 }
 

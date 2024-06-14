@@ -178,26 +178,40 @@ pub trait StreamId: std::hash::Hash + Eq + Copy + 'static {
         Self: Sized;
 }
 
+pub trait ErrorFatality {
+    /// returns whether the error is fatal
+    ///
+    /// if the error isn't fatal then encountering this error is part of normal use
+    /// and retrying the action again later may succeed
+    fn is_fatal(&self) -> bool;
+}
+
 /// contains operations for a mutable reference to a send stream with lifetime `'s`
 pub trait SendStreamMut<'s> {
-    type SendError: 'static;
+    type SendError: ErrorFatality + 'static;
 
     type CloseDescription: 'static;
 
     fn send(&mut self, data: &[u8]) -> Result<usize, Self::SendError>;
 
     fn close(&mut self, description: Self::CloseDescription) -> Result<(), ()>;
+
+    /// indicates if the stream is still open
+    fn is_open(&self) -> bool;
 }
 
 /// contains operations for a mutable reference to a recv stream with lifetime `'s`
 pub trait RecvStreamMut<'s> {
-    type ReadError;
+    type ReadError: ErrorFatality + 'static;
 
-    type CloseDescription;
+    type CloseDescription: 'static;
 
     fn recv(&mut self, limit: usize) -> Result<Box<[u8]>, Self::ReadError>;
 
     fn close(&mut self, description: Self::CloseDescription) -> Result<(), ()>;
+
+    /// indicates if the stream is still open
+    fn is_open(&self) -> bool;
 }
 
 /// events fired by streams

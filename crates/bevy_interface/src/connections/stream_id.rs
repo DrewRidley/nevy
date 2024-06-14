@@ -33,7 +33,7 @@ impl Clone for BevyStreamId {
 }
 
 impl BevyStreamId {
-    pub(crate) fn new<T: BevyStreamIdInner>(inner: T) -> BevyStreamId {
+    pub(crate) fn new<T: BevyStreamIdInner>(inner: T) -> Self {
         BevyStreamId {
             inner: Box::new(inner),
         }

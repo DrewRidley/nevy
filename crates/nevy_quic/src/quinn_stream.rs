@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use transport_interface::*;
 
@@ -10,12 +10,15 @@ pub struct QuinnStreamId(pub(crate) quinn_proto::StreamId);
 
 pub struct QuinnSendStreamMut<'s> {
     stream: quinn_proto::SendStream<'s>,
+    stream_id: QuinnStreamId,
+    open_streams: &'s mut HashSet<QuinnStreamId>,
 }
 
 pub struct QuinnRecvStreamMut<'s> {
     events: &'s mut VecDeque<StreamEvent<QuinnStreamId>>,
     stream_id: QuinnStreamId,
     stream: quinn_proto::RecvStream<'s>,
+    open_streams: &'s mut HashSet<QuinnStreamId>,
 }
 
 #[derive(Debug)]
@@ -33,8 +36,29 @@ pub enum QuinnReadError {
     ///
     /// this may be followed by a closed stream event
     Blocked,
+    /// the stream has finished and no more data will be available
+    Finished,
     /// the stream has never been opened, has been finished or was reset
     NoStream,
+}
+
+impl ErrorFatality for QuinnSendError {
+    fn is_fatal(&self) -> bool {
+        match self {
+            QuinnSendError::Blocked => false,
+            QuinnSendError::NoStream => true,
+        }
+    }
+}
+
+impl ErrorFatality for QuinnReadError {
+    fn is_fatal(&self) -> bool {
+        match self {
+            QuinnReadError::Blocked => false,
+            QuinnReadError::Finished => false,
+            QuinnReadError::NoStream => true,
+        }
+    }
 }
 
 impl<'s, 'c> SendStreamMut<'s> for QuinnSendStreamMut<'s> {
@@ -52,10 +76,20 @@ impl<'s, 'c> SendStreamMut<'s> for QuinnSendStreamMut<'s> {
     }
 
     fn close(&mut self, description: Self::CloseDescription) -> Result<(), ()> {
-        match description {
-            Some(reset_error_code) => self.stream.reset(reset_error_code).map_err(|_| ()),
-            None => self.stream.finish().map_err(|_| ()),
+        if match description {
+            Some(reset_error_code) => self.stream.reset(reset_error_code).is_ok(),
+            None => self.stream.finish().is_ok(),
+        } {
+            self.open_streams.remove(&self.stream_id);
+
+            Ok(())
+        } else {
+            Err(())
         }
+    }
+
+    fn is_open(&self) -> bool {
+        self.open_streams.contains(&self.stream_id)
     }
 }
 
@@ -75,6 +109,8 @@ impl<'s, 'c> RecvStreamMut<'s> for QuinnRecvStreamMut<'s> {
 
         let bytes = match chunks.next(limit) {
             Ok(None) => {
+                self.open_streams.remove(&self.stream_id);
+
                 self.events.push_back(StreamEvent {
                     stream_id: self.stream_id,
                     peer_generated: true,
@@ -94,7 +130,18 @@ impl<'s, 'c> RecvStreamMut<'s> for QuinnRecvStreamMut<'s> {
     }
 
     fn close(&mut self, description: Self::CloseDescription) -> Result<(), ()> {
-        self.stream.stop(description).map_err(|_| ())
+        match self.stream.stop(description) {
+            Ok(()) => {
+                self.open_streams.remove(&self.stream_id);
+
+                Ok(())
+            }
+            Err(_) => Err(()),
+        }
+    }
+
+    fn is_open(&self) -> bool {
+        self.open_streams.contains(&self.stream_id)
     }
 }
 
@@ -111,17 +158,28 @@ impl StreamId for QuinnStreamId {
         connection: &mut &'c mut QuinnConnection,
         description: Self::OpenDescription,
     ) -> Option<Self> {
-        Some(QuinnStreamId(
-            connection.connection.streams().open(description)?,
-        ))
+        let stream_id = QuinnStreamId(connection.connection.streams().open(description)?);
+
+        connection.open_send_streams.insert(stream_id);
+        if let quinn_proto::Dir::Bi = description {
+            connection.open_recv_streams.insert(stream_id);
+        }
+
+        Some(stream_id)
     }
 
     fn get_send<'c, 's>(
         self,
         connection: &'s mut &'c mut QuinnConnection,
     ) -> Option<Self::SendMut<'s>> {
+        if !connection.open_send_streams.contains(&self) {
+            return None;
+        }
+
         Some(QuinnSendStreamMut {
             stream: connection.connection.send_stream(self.0),
+            stream_id: self,
+            open_streams: &mut connection.open_send_streams,
         })
     }
 
@@ -129,10 +187,15 @@ impl StreamId for QuinnStreamId {
         self,
         connection: &'s mut &'c mut QuinnConnection,
     ) -> Option<Self::RecvMut<'s>> {
+        if !connection.open_recv_streams.contains(&self) {
+            return None;
+        }
+
         Some(QuinnRecvStreamMut {
             events: &mut connection.stream_events,
             stream_id: self,
             stream: connection.connection.recv_stream(self.0),
+            open_streams: &mut connection.open_recv_streams,
         })
     }
 

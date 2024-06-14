@@ -4,6 +4,11 @@ use transport_interface::*;
 
 use super::MismatchedStreamType;
 
+/// type erased stream open description
+///
+/// because it is type erased it can be given to plugins to be able to open streams
+///
+/// if a plugin needs to open arbitrarily many streams from one description see [CloneableStreamDescription]
 pub struct StreamDescription {
     description: Box<dyn Any>,
 }
@@ -34,6 +39,11 @@ trait CloneableDescription {
     fn into_any(self: Box<Self>) -> Box<dyn Any>;
 }
 
+/// type erased stream open description
+///
+/// because it is type erased it can be given to plugins to be able to open streams
+///
+/// this type implements `Into<StreamDescription>`
 pub struct CloneableStreamDescription {
     description: Box<dyn CloneableDescription>,
 }

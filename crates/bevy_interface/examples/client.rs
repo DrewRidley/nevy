@@ -176,14 +176,23 @@ fn send_stream_data(
                 break;
             }
 
-            let sent = stream.send(&stream_queue.buffer).unwrap();
-            if sent == 0 {
-                break;
+            match stream.send(&stream_queue.buffer) {
+                Ok(sent) => {
+                    if sent == 0 {
+                        break;
+                    }
+
+                    stream_queue.buffer.drain(..sent);
+                    debug!("sent {} bytes", sent);
+                }
+                Err(err) => {
+                    if err.is_fatal() {
+                        panic!("fatal error sending data");
+                    }
+
+                    break;
+                }
             }
-
-            stream_queue.buffer.drain(..sent);
-
-            debug!("sent {} bytes", sent);
         }
     }
 }

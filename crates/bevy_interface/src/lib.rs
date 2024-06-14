@@ -4,11 +4,14 @@ pub mod connections;
 pub mod endpoint;
 
 pub mod prelude {
-    pub use crate::connections::{BevyStreamId, MismatchedStreamType, StreamDescription};
+    pub use crate::connections::{
+        BevyStreamEvent, BevyStreamId, MismatchedStreamType, StreamDescription,
+    };
     pub use crate::endpoint::{
         BevyConnection, BevyEndpoint, ConnectError, Connections, MismatchedEndpointType,
     };
     pub use crate::{Connected, Disconnected, EndpointPlugin};
+    pub use transport_interface::StreamEventType;
 }
 
 /// adds events and update loop for
