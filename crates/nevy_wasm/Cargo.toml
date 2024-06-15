@@ -6,11 +6,9 @@ edition = "2021"
 
 [dependencies]
 transport_interface.path = "../transport_interface"
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-js-sys = "0.3.69"
-bytes = "1"
+web-transport-wasm = { git = "https://github.com/kixelated/web-transport-rs" }
 slotmap = "1.0.7"
+futures-lite = "2.3.0"
 
 [dependencies.web-sys]
 version = "0.3.69"
