@@ -2,13 +2,13 @@ use std::any::Any;
 
 use transport_interface::*;
 
-use super::MismatchedStreamType;
+use super::MismatchedType;
 
-/// type erased stream open description
+/// type erased description used for opening and closing streams
 ///
 /// because it is type erased it can be given to plugins to be able to open streams
 ///
-/// if a plugin needs to open arbitrarily many streams from one description see [CloneableStreamDescription]
+/// if a plugin needs to use a description more than once see [CloneableStreamDescription]
 pub struct StreamDescription {
     description: Box<dyn Any>,
 }
@@ -23,10 +23,10 @@ impl StreamDescription {
         }
     }
 
-    pub(crate) fn downcast<T: 'static>(self) -> Result<T, MismatchedStreamType> {
+    pub(crate) fn downcast<T: 'static>(self) -> Result<T, MismatchedType> {
         match self.description.downcast() {
             Ok(downcasted) => Ok(*downcasted),
-            Err(_) => Err(MismatchedStreamType {
+            Err(_) => Err(MismatchedType {
                 expected: std::any::type_name::<T>(),
             }),
         }
@@ -39,7 +39,7 @@ trait CloneableDescription {
     fn into_any(self: Box<Self>) -> Box<dyn Any>;
 }
 
-/// type erased stream open description
+/// type erased description used for opening and closing streams
 ///
 /// because it is type erased it can be given to plugins to be able to open streams
 ///

@@ -134,7 +134,7 @@ fn send_message(
             let mut connection = endpoint.connection_mut(connection_entity).unwrap();
 
             let stream_id = connection
-                .open_stream(StreamDescription::new::<QuinnStreamId>(
+                .open_stream(Description::new::<QuinnStreamId>(
                     nevy_quic::quinn_proto::Dir::Uni,
                 ))
                 .unwrap()

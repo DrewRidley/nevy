@@ -2,6 +2,8 @@ use std::any::Any;
 
 use transport_interface::*;
 
+use super::{MismatchedType, StreamDescription};
+
 pub trait StreamError {
     fn is_fatal(&self) -> bool;
 
@@ -20,6 +22,10 @@ impl<E: ErrorFatality + 'static> StreamError for E {
 
 pub(crate) trait BevySendStreamInner<'s> {
     fn send(&mut self, data: &[u8]) -> Result<usize, Box<dyn StreamError>>;
+
+    fn close(&mut self, description: StreamDescription) -> Result<Result<(), ()>, MismatchedType>;
+
+    fn is_open(&self) -> bool;
 }
 
 /// type erased mutable access to a send stream
@@ -32,6 +38,16 @@ impl<'s, S: SendStreamMut<'s>> BevySendStreamInner<'s> for S {
         self.send(data)
             .map_err(|err| -> Box<dyn StreamError> { Box::new(err) })
     }
+
+    fn close(&mut self, description: StreamDescription) -> Result<Result<(), ()>, MismatchedType> {
+        let description = description.downcast()?;
+
+        Ok(self.close(description))
+    }
+
+    fn is_open(&self) -> bool {
+        self.is_open()
+    }
 }
 
 impl<'s> BevySendStream<'s> {
@@ -43,6 +59,17 @@ impl<'s> BevySendStream<'s> {
 
     pub fn send(&mut self, data: &[u8]) -> Result<usize, Box<dyn StreamError>> {
         self.inner.send(data)
+    }
+
+    pub fn close(
+        &mut self,
+        description: StreamDescription,
+    ) -> Result<Result<(), ()>, MismatchedType> {
+        self.inner.close(description)
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.inner.is_open()
     }
 }
 

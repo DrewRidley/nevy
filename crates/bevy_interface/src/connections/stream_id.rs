@@ -2,7 +2,7 @@ use std::any::Any;
 
 use transport_interface::*;
 
-use super::MismatchedStreamType;
+use super::MismatchedType;
 
 pub(crate) trait BevyStreamIdInner: Send + Sync + 'static {
     fn into_any(self: Box<Self>) -> Box<dyn Any>;
@@ -39,10 +39,10 @@ impl BevyStreamId {
         }
     }
 
-    pub(crate) fn downcast<T: 'static>(self) -> Result<T, MismatchedStreamType> {
+    pub(crate) fn downcast<T: 'static>(self) -> Result<T, MismatchedType> {
         match self.inner.into_any().downcast() {
             Ok(downcasted) => Ok(*downcasted),
-            Err(_) => Err(MismatchedStreamType {
+            Err(_) => Err(MismatchedType {
                 expected: std::any::type_name::<T>(),
             }),
         }

@@ -8,7 +8,7 @@ pub use stream_description::*;
 pub use stream_id::*;
 
 #[derive(Debug)]
-pub struct MismatchedStreamType {
+pub struct MismatchedType {
     pub expected: &'static str,
 }
 
@@ -16,17 +16,17 @@ trait BevyConnectionInner<'c> {
     fn open_stream(
         &mut self,
         description: StreamDescription,
-    ) -> Result<Option<BevyStreamId>, MismatchedStreamType>;
+    ) -> Result<Option<BevyStreamId>, MismatchedType>;
 
     fn send_stream(
         &mut self,
         stream_id: BevyStreamId,
-    ) -> Result<Option<BevySendStream>, MismatchedStreamType>;
+    ) -> Result<Option<BevySendStream>, MismatchedType>;
 
     fn recv_stream(
         &mut self,
         stream_id: BevyStreamId,
-    ) -> Result<Option<BevyRecvStream>, MismatchedStreamType>;
+    ) -> Result<Option<BevyRecvStream>, MismatchedType>;
 
     fn poll_stream_events(&mut self) -> Option<BevyStreamEvent>;
 }
@@ -43,7 +43,7 @@ where
     fn open_stream(
         &mut self,
         description: StreamDescription,
-    ) -> Result<Option<BevyStreamId>, MismatchedStreamType> {
+    ) -> Result<Option<BevyStreamId>, MismatchedType> {
         let description = description.downcast()?;
 
         let Some(stream_id) = self.open_stream(description) else {
@@ -56,7 +56,7 @@ where
     fn send_stream(
         &mut self,
         stream_id: BevyStreamId,
-    ) -> Result<Option<BevySendStream>, MismatchedStreamType> {
+    ) -> Result<Option<BevySendStream>, MismatchedType> {
         let stream_id = stream_id.downcast()?;
 
         let Some(send_stream) = self.send_stream(stream_id) else {
@@ -69,7 +69,7 @@ where
     fn recv_stream(
         &mut self,
         stream_id: BevyStreamId,
-    ) -> Result<Option<BevyRecvStream>, MismatchedStreamType> {
+    ) -> Result<Option<BevyRecvStream>, MismatchedType> {
         let stream_id = stream_id.downcast()?;
 
         let Some(recv_stream) = self.recv_stream(stream_id) else {
@@ -97,21 +97,21 @@ impl<'c> BevyConnectionMut<'c> {
     pub fn open_stream(
         &mut self,
         description: StreamDescription,
-    ) -> Result<Option<BevyStreamId>, MismatchedStreamType> {
+    ) -> Result<Option<BevyStreamId>, MismatchedType> {
         self.inner.open_stream(description)
     }
 
     pub fn send_stream(
         &mut self,
         stream_id: BevyStreamId,
-    ) -> Result<Option<BevySendStream>, MismatchedStreamType> {
+    ) -> Result<Option<BevySendStream>, MismatchedType> {
         self.inner.send_stream(stream_id)
     }
 
     pub fn recv_stream(
         &mut self,
         stream_id: BevyStreamId,
-    ) -> Result<Option<BevyRecvStream>, MismatchedStreamType> {
+    ) -> Result<Option<BevyRecvStream>, MismatchedType> {
         self.inner.recv_stream(stream_id)
     }
 
