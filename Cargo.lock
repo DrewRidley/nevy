@@ -788,13 +788,11 @@ dependencies = [
 name = "nevy_wasm"
 version = "0.1.0"
 dependencies = [
- "bytes",
- "js-sys",
+ "futures-lite",
  "slotmap",
  "transport_interface",
- "wasm-bindgen",
- "wasm-bindgen-futures",
  "web-sys",
+ "web-transport-wasm",
 ]
 
 [[package]]
@@ -1628,6 +1626,18 @@ dependencies = [
  "http",
  "thiserror",
  "url",
+]
+
+[[package]]
+name = "web-transport-wasm"
+version = "0.1.0"
+source = "git+https://github.com/kixelated/web-transport-rs#7fcc05c247722bb317287d37dff89f41007581cd"
+dependencies = [
+ "bytes",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
