@@ -14,6 +14,7 @@ fn main() {
     });
 
     app.add_plugins(EndpointPlugin::default());
+    app.add_plugins(StreamHeaderPlugin::default());
 
     app.add_systems(Startup, (spawn_endpoint, apply_deferred, connect).chain());
     app.add_systems(Update, (log_events, send_message, send_stream_data));
@@ -27,7 +28,7 @@ struct ExampleEndpoint;
 #[derive(Component)]
 struct ExampleStream {
     connection_entity: Entity,
-    stream_id: BevyStreamId,
+    stream_id: HeaderStreamId,
     buffer: Vec<u8>,
 }
 
@@ -133,12 +134,15 @@ fn send_message(
 
             let mut connection = endpoint.connection_mut(connection_entity).unwrap();
 
-            let stream_id = connection
-                .open_stream(Description::new_open_description::<QuinnStreamId>(
+            let stream_id = HeaderStreamId::new(
+                &mut connection,
+                Description::new_open_description::<QuinnStreamId>(
                     nevy_quic::quinn_proto::Dir::Uni,
-                ))
-                .unwrap()
-                .unwrap();
+                ),
+                96,
+            )
+            .unwrap()
+            .unwrap();
 
             debug!("Opened stream");
 
@@ -165,16 +169,20 @@ fn send_stream_data(
             .connection_mut(stream_queue.connection_entity)
             .unwrap();
 
-        let mut stream = connection
-            .send_stream(stream_queue.stream_id.clone())
-            .unwrap()
-            .unwrap();
+        let Some(stream_id) = stream_queue.stream_id.poll_ready(&mut connection).unwrap() else {
+            continue;
+        };
+
+        let mut stream = connection.send_stream(stream_id.clone()).unwrap().unwrap();
 
         loop {
             if stream_queue.buffer.len() == 0 {
-                stream.close(Description::new_send_close_description::<QuinnStreamId>(
-                    None,
-                ));
+                stream
+                    .close(Description::new_send_close_description::<QuinnStreamId>(
+                        None,
+                    ))
+                    .unwrap()
+                    .unwrap();
                 commands.entity(stream_entity).despawn();
                 break;
             }

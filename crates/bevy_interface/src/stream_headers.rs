@@ -1,5 +1,3 @@
-use std::num::NonZeroI8;
-
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*, utils::intern::Interned};
 use transport_interface::StreamEventType;
 
@@ -11,8 +9,13 @@ use crate::{
 
 type Header = u16;
 
-/// adds events and update loop for
-/// [BevyEndpoint] and [BevyConnection]
+/// On any endpoint with [EndpointStreamHeaders],
+/// will poll stream events and re-emit [HeaderStreamEvent]s
+///
+/// will read the first few bytes and determine a header for each new recv stream before
+/// firing an event with it's id
+///
+/// use [HeaderStreamId] to properly send those headers on all streams destined for these endpoints
 pub struct StreamHeaderPlugin {
     schedule: Interned<dyn ScheduleLabel>,
 }
@@ -36,12 +39,17 @@ impl Plugin for StreamHeaderPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<HeaderStreamEvent>();
 
-        app.add_systems(self.schedule, initialize_clients);
+        app.add_systems(
+            self.schedule,
+            (initialize_clients, poll_stream_events, read_headers),
+        );
     }
 }
 
 #[derive(Event)]
 pub struct HeaderStreamEvent {
+    pub endpoint_entity: Entity,
+    pub connection_entity: Entity,
     pub stream_id: BevyStreamId,
     pub peer_generated: bool,
     pub event_type: HeaderStreamEventType,
@@ -54,6 +62,7 @@ pub enum HeaderStreamEventType {
     ClosedRecvStream,
 }
 
+/// insert on all endpoints to enable stream header functionality
 #[derive(Component)]
 pub struct EndpointStreamHeaders;
 
@@ -82,10 +91,10 @@ fn initialize_clients(
 
 fn poll_stream_events(
     mut connections: Connections,
-    mut connection_q: Query<(Entity, &mut ConnectionStreamHeaders)>,
+    mut connection_q: Query<(Entity, &mut ConnectionStreamHeaders, &Parent)>,
     mut event_w: EventWriter<HeaderStreamEvent>,
 ) {
-    for (connection_entity, mut headers) in connection_q.iter_mut() {
+    for (connection_entity, mut headers, connection_parent) in connection_q.iter_mut() {
         let Some(mut endpoint) = connections.connection_endpoint_mut(connection_entity) else {
             error!(
                 "Couldn't query connection {:?}'s endpoint",
@@ -116,6 +125,8 @@ fn poll_stream_events(
                 }
                 event_type => {
                     event_w.send(HeaderStreamEvent {
+                        endpoint_entity: connection_parent.get(),
+                        connection_entity,
                         stream_id,
                         peer_generated,
                         event_type: match event_type {
@@ -138,9 +149,9 @@ fn poll_stream_events(
 fn read_headers(
     mut event_w: EventWriter<HeaderStreamEvent>,
     mut connections: Connections,
-    mut connection_q: Query<(Entity, &mut ConnectionStreamHeaders)>,
+    mut connection_q: Query<(Entity, &mut ConnectionStreamHeaders, &Parent)>,
 ) {
-    for (connection_entity, mut headers) in connection_q.iter_mut() {
+    for (connection_entity, mut headers, connection_parent) in connection_q.iter_mut() {
         if headers.uninitialized_streams.len() == 0 {
             continue;
         }
@@ -179,6 +190,8 @@ fn read_headers(
                         let header = Header::from_be_bytes(buffer.clone().try_into().unwrap());
 
                         event_w.send(HeaderStreamEvent {
+                            endpoint_entity: connection_parent.get(),
+                            connection_entity,
                             stream_id: stream_id.clone(),
                             peer_generated: *peer_generated,
                             event_type: HeaderStreamEventType::NewRecvStream(header),
@@ -216,27 +229,25 @@ fn read_headers(
     }
 }
 
-pub struct UninitializedStream {
+/// wraps a [BevyStreamId] and will not return
+/// that stream id until a header is successfully sent
+///
+/// this ensures that the application can't use that stream id
+/// unless the header has been sent first
+pub struct HeaderStreamId {
     stream_id: BevyStreamId,
     header: Vec<u8>,
 }
 
-pub enum InitializeStreamError {
+#[derive(Debug)]
+pub enum InitializeHeaderStreamError {
     StreamClosedPrematurly,
-    MismatchedConnection {
-        stream: UninitializedStream,
-        connection: MismatchedType,
-    },
+    MismatchedConnection { connection: MismatchedType },
     FatalSendErr(Box<dyn StreamError>),
 }
 
-impl std::fmt::Debug for InitializeStreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
-    }
-}
-
-impl UninitializedStream {
+impl HeaderStreamId {
+    /// tries to create a new stream on a connection
     pub fn new(
         connection: &mut BevyConnectionMut,
         description: Description,
@@ -248,43 +259,45 @@ impl UninitializedStream {
             Ok(Some(stream_id)) => stream_id,
         };
 
-        Ok(Some(UninitializedStream {
+        Ok(Some(HeaderStreamId {
             stream_id,
             header: header.to_be_bytes().into(),
         }))
     }
 
+    /// Attempts to write the header, if successful will return the wrapped [BevyStreamId].
+    ///
+    /// This method can be called repeatedly to get the stream id even after completion,
+    /// but after the stream id has been successfuly returned once the [HeaderStreamId] can be dropped and the
+    /// [BevyStreamId] can be used normally from that point on.
     pub fn poll_ready(
-        mut self,
+        &mut self,
         connection: &mut BevyConnectionMut,
-    ) -> Result<Result<BevyStreamId, Self>, InitializeStreamError> {
+    ) -> Result<Option<BevyStreamId>, InitializeHeaderStreamError> {
         let mut stream = match connection.send_stream(self.stream_id.clone()) {
             Err(err) => {
-                return Err(InitializeStreamError::MismatchedConnection {
-                    stream: self,
-                    connection: err,
-                })
+                return Err(InitializeHeaderStreamError::MismatchedConnection { connection: err })
             }
-            Ok(None) => return Err(InitializeStreamError::StreamClosedPrematurly),
+            Ok(None) => return Err(InitializeHeaderStreamError::StreamClosedPrematurly),
             Ok(Some(stream)) => stream,
         };
 
         loop {
             if self.header.len() == 0 {
-                return Ok(Ok(self.stream_id));
+                return Ok(Some(self.stream_id.clone()));
             }
 
             match stream.send(&self.header) {
                 Err(err) => {
                     if err.is_fatal() {
-                        return Err(InitializeStreamError::FatalSendErr(err));
+                        return Err(InitializeHeaderStreamError::FatalSendErr(err));
                     }
 
-                    break Ok(Err(self));
+                    break Ok(None);
                 }
                 Ok(bytes) => {
                     if bytes == 0 {
-                        break Ok(Err(self));
+                        break Ok(None);
                     }
 
                     self.header.drain(..bytes);

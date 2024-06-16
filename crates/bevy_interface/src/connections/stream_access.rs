@@ -4,7 +4,7 @@ use transport_interface::*;
 
 use crate::{description::Description, MismatchedType};
 
-pub trait StreamError {
+pub trait StreamError: std::fmt::Debug {
     fn is_fatal(&self) -> bool;
 
     fn into_any(self: Box<Self>) -> Box<dyn Any>;

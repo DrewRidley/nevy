@@ -1,5 +1,3 @@
-use std::any::Any;
-
 use bevy::{prelude::*, utils::HashMap};
 use transport_interface::*;
 
@@ -20,8 +18,6 @@ pub struct BevyEndpoint {
 }
 
 trait BevyEndpointType: Send + Sync {
-    fn endpoint_type_name(&self) -> &'static str;
-
     fn update(&mut self, endpoint_entity: Entity, params: &mut UpdateHandlerParams);
 
     fn connect(
@@ -111,10 +107,6 @@ where
     E::ConnectionId: Send + Sync,
     for<'a> <E::Connection<'a> as ConnectionMut<'a>>::StreamType: Send + Sync,
 {
-    fn endpoint_type_name(&self) -> &'static str {
-        std::any::type_name::<E>()
-    }
-
     fn update(&mut self, endpoint_entity: Entity, params: &mut UpdateHandlerParams) {
         self.endpoint.update(&mut UpdateHandler {
             params,

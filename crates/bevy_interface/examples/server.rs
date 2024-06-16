@@ -14,6 +14,7 @@ fn main() {
     });
 
     app.add_plugins(EndpointPlugin::default());
+    app.add_plugins(StreamHeaderPlugin::default());
 
     app.add_systems(Startup, spawn_endpoint);
     app.add_systems(Update, (log_events, spawn_streams, receive_data));
@@ -79,41 +80,40 @@ fn spawn_endpoint(mut commands: Commands) {
     let endpoint =
         QuinnEndpoint::new("0.0.0.0:27018".parse().unwrap(), None, Some(server_config)).unwrap();
 
-    commands.spawn((ExampleEndpoint, BevyEndpoint::new(endpoint)));
+    commands.spawn((
+        ExampleEndpoint,
+        EndpointStreamHeaders,
+        BevyEndpoint::new(endpoint),
+    ));
 }
 
 fn spawn_streams(
     mut commands: Commands,
-    connection_q: Query<Entity, With<BevyConnection>>,
-    mut connections: Connections,
+    endpoint_q: Query<(), With<ExampleEndpoint>>,
+    mut stream_event_r: EventReader<HeaderStreamEvent>,
 ) {
-    for connection_entity in connection_q.iter() {
-        let mut endpoint = connections
-            .connection_endpoint_mut(connection_entity)
-            .unwrap();
+    for HeaderStreamEvent {
+        endpoint_entity,
+        connection_entity,
+        stream_id,
+        event_type,
+        ..
+    } in stream_event_r.read()
+    {
+        if !endpoint_q.contains(*endpoint_entity) {
+            continue;
+        }
 
-        let mut connection = endpoint.connection_mut(connection_entity).unwrap();
+        if let HeaderStreamEventType::NewRecvStream(header) = event_type {
+            info!("new recv stream with header {}", header);
 
-        while let Some(BevyStreamEvent {
-            stream_id,
-            event_type,
-            ..
-        }) = connection.poll_stream_events()
-        {
-            match event_type {
-                StreamEventType::NewSendStream => (),
-                StreamEventType::ClosedSendStream => (),
-                StreamEventType::NewRecvStream => {
-                    commands
-                        .spawn(ExampleStream {
-                            connection_entity,
-                            stream_id,
-                            buffer: Vec::new(),
-                        })
-                        .set_parent(connection_entity);
-                }
-                StreamEventType::ClosedRecvStream => (),
-            }
+            commands
+                .spawn(ExampleStream {
+                    connection_entity: *connection_entity,
+                    stream_id: stream_id.clone(),
+                    buffer: Vec::new(),
+                })
+                .set_parent(*connection_entity);
         }
     }
 }
@@ -148,7 +148,10 @@ fn receive_data(
                     }
 
                     if !stream.is_open() {
-                        info!("message received: {:?}", example_stream.buffer);
+                        info!(
+                            "message received: {:?}",
+                            String::from_utf8_lossy(&example_stream.buffer)
+                        );
 
                         commands.entity(stream_entity).despawn();
                     }

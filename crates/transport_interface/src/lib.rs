@@ -178,7 +178,7 @@ pub trait StreamId: std::hash::Hash + Eq + Copy + 'static {
         Self: Sized;
 }
 
-pub trait ErrorFatality {
+pub trait ErrorFatality: std::fmt::Debug {
     /// returns whether the error is fatal
     ///
     /// if the error isn't fatal then encountering this error is part of normal use
