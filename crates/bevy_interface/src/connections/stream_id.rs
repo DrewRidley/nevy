@@ -2,7 +2,7 @@ use std::any::Any;
 
 use transport_interface::*;
 
-use super::MismatchedType;
+use crate::MismatchedType;
 
 pub(crate) trait BevyStreamIdInner: Send + Sync + 'static {
     fn into_any(self: Box<Self>) -> Box<dyn Any>;

@@ -1,21 +1,16 @@
 use transport_interface::*;
 
 mod stream_access;
-mod stream_description;
 mod stream_id;
 pub use stream_access::*;
-pub use stream_description::*;
 pub use stream_id::*;
 
-#[derive(Debug)]
-pub struct MismatchedType {
-    pub expected: &'static str,
-}
+use crate::{description::Description, MismatchedType};
 
 trait BevyConnectionInner<'c> {
     fn open_stream(
         &mut self,
-        description: StreamDescription,
+        description: Description,
     ) -> Result<Option<BevyStreamId>, MismatchedType>;
 
     fn send_stream(
@@ -42,7 +37,7 @@ where
 {
     fn open_stream(
         &mut self,
-        description: StreamDescription,
+        description: Description,
     ) -> Result<Option<BevyStreamId>, MismatchedType> {
         let description = description.downcast()?;
 
@@ -96,7 +91,7 @@ impl<'c> BevyConnectionMut<'c> {
 
     pub fn open_stream(
         &mut self,
-        description: StreamDescription,
+        description: Description,
     ) -> Result<Option<BevyStreamId>, MismatchedType> {
         self.inner.open_stream(description)
     }

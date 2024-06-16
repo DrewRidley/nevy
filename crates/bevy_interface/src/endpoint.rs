@@ -3,7 +3,10 @@ use std::any::Any;
 use bevy::{prelude::*, utils::HashMap};
 use transport_interface::*;
 
-use crate::{connections::BevyConnectionMut, Connected, Disconnected};
+use crate::{
+    connections::BevyConnectionMut, description::Description, Connected, Disconnected,
+    MismatchedType,
+};
 
 /// the component that holds state and represents a networking endpoint
 ///
@@ -25,8 +28,8 @@ trait BevyEndpointType: Send + Sync {
         &mut self,
         commands: &mut Commands,
         endpoint_entity: Entity,
-        connect_info: Box<dyn Any>,
-    ) -> Result<Option<Entity>, MismatchedEndpointType>;
+        connect_info: Description,
+    ) -> Result<Option<Entity>, MismatchedType>;
 
     fn connection_mut<'c>(&'c mut self, connection_entity: Entity)
         -> Option<BevyConnectionMut<'c>>;
@@ -125,15 +128,11 @@ where
         &mut self,
         commands: &mut Commands,
         endpoint_entity: Entity,
-        connect_info: Box<dyn Any>,
-    ) -> Result<Option<Entity>, MismatchedEndpointType> {
-        let Ok(connect_info) = connect_info.downcast::<E::ConnectInfo>() else {
-            return Err(MismatchedEndpointType {
-                actual: self.endpoint_type_name(),
-            });
-        };
+        connect_info: Description,
+    ) -> Result<Option<Entity>, MismatchedType> {
+        let connect_info = connect_info.downcast()?;
 
-        let Some((connection_id, _)) = self.endpoint.connect(*connect_info) else {
+        let Some((connection_id, _)) = self.endpoint.connect(connect_info) else {
             return Ok(None);
         };
 
@@ -268,16 +267,9 @@ where
     }
 }
 
-/// error returned when a [BevyEndpoint]'s internal [dyn EndpointState<E>]
-/// was expected to have an expected `E` but it had a different one
-#[derive(Debug)]
-pub struct MismatchedEndpointType {
-    pub actual: &'static str,
-}
-
 #[derive(Debug)]
 pub enum ConnectError {
-    MismatchedEndpointType(MismatchedEndpointType),
+    MismatchedEndpointType(MismatchedType),
     InvalidEntity,
 }
 
@@ -285,10 +277,10 @@ impl<'w, 's> Connections<'w, 's> {
     pub fn connect<E: Endpoint>(
         &mut self,
         endpoint_entity: Entity,
-        connect_info: E::ConnectInfo,
+        connect_info: Description,
     ) -> Result<Option<Entity>, ConnectError>
     where
-        E::ConnectInfo: 'static,
+        E::ConnectDescription: 'static,
     {
         let Ok(mut endpoint) = self.endpoint_q.get_mut(endpoint_entity) else {
             return Err(ConnectError::InvalidEntity);
@@ -296,7 +288,7 @@ impl<'w, 's> Connections<'w, 's> {
 
         endpoint
             .state
-            .connect(&mut self.commands, endpoint_entity, Box::new(connect_info))
+            .connect(&mut self.commands, endpoint_entity, connect_info)
             .map_err(|err| ConnectError::MismatchedEndpointType(err))
     }
 

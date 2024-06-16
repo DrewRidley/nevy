@@ -32,7 +32,7 @@ impl Endpoint for WebTransportEndpoint {
 
     type ConnectionId = QuinnConnectionId;
 
-    type ConnectInfo = (
+    type ConnectDescription = (
         quinn_proto::ClientConfig,
         SocketAddr,
         std::borrow::Cow<'static, str>,
@@ -116,7 +116,7 @@ impl Endpoint for WebTransportEndpoint {
 
     fn connect<'c>(
         &'c mut self,
-        info: Self::ConnectInfo,
+        info: Self::ConnectDescription,
     ) -> Option<(Self::ConnectionId, Self::Connection<'c>)> {
         let (connection_id, quinn) = self.quinn.connect(info)?;
 

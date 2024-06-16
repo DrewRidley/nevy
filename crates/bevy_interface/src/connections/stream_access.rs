@@ -2,7 +2,7 @@ use std::any::Any;
 
 use transport_interface::*;
 
-use super::{MismatchedType, StreamDescription};
+use crate::{description::Description, MismatchedType};
 
 pub trait StreamError {
     fn is_fatal(&self) -> bool;
@@ -23,7 +23,7 @@ impl<E: ErrorFatality + 'static> StreamError for E {
 pub(crate) trait BevySendStreamInner<'s> {
     fn send(&mut self, data: &[u8]) -> Result<usize, Box<dyn StreamError>>;
 
-    fn close(&mut self, description: StreamDescription) -> Result<Result<(), ()>, MismatchedType>;
+    fn close(&mut self, description: Description) -> Result<Result<(), ()>, MismatchedType>;
 
     fn is_open(&self) -> bool;
 }
@@ -39,7 +39,7 @@ impl<'s, S: SendStreamMut<'s>> BevySendStreamInner<'s> for S {
             .map_err(|err| -> Box<dyn StreamError> { Box::new(err) })
     }
 
-    fn close(&mut self, description: StreamDescription) -> Result<Result<(), ()>, MismatchedType> {
+    fn close(&mut self, description: Description) -> Result<Result<(), ()>, MismatchedType> {
         let description = description.downcast()?;
 
         Ok(self.close(description))
@@ -61,10 +61,7 @@ impl<'s> BevySendStream<'s> {
         self.inner.send(data)
     }
 
-    pub fn close(
-        &mut self,
-        description: StreamDescription,
-    ) -> Result<Result<(), ()>, MismatchedType> {
+    pub fn close(&mut self, description: Description) -> Result<Result<(), ()>, MismatchedType> {
         self.inner.close(description)
     }
 
@@ -75,6 +72,8 @@ impl<'s> BevySendStream<'s> {
 
 pub(crate) trait BevyRecvStreamInner<'s> {
     fn recv(&mut self, limit: usize) -> Result<Box<[u8]>, Box<dyn StreamError>>;
+
+    fn close(&mut self, description: Description) -> Result<Result<(), ()>, MismatchedType>;
 
     fn is_open(&self) -> bool;
 }
@@ -88,6 +87,12 @@ impl<'s, S: RecvStreamMut<'s>> BevyRecvStreamInner<'s> for S {
     fn recv(&mut self, limit: usize) -> Result<Box<[u8]>, Box<dyn StreamError>> {
         self.recv(limit)
             .map_err(|err| -> Box<dyn StreamError> { Box::new(err) })
+    }
+
+    fn close(&mut self, description: Description) -> Result<Result<(), ()>, MismatchedType> {
+        let description = description.downcast()?;
+
+        Ok(self.close(description))
     }
 
     fn is_open(&self) -> bool {
@@ -104,6 +109,10 @@ impl<'s> BevyRecvStream<'s> {
 
     pub fn recv(&mut self, limit: usize) -> Result<Box<[u8]>, Box<dyn StreamError>> {
         self.inner.recv(limit)
+    }
+
+    pub fn close(&mut self, description: Description) -> Result<Result<(), ()>, MismatchedType> {
+        self.inner.close(description)
     }
 
     pub fn is_open(&self) -> bool {

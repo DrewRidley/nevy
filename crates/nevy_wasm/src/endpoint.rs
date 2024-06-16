@@ -12,7 +12,7 @@ impl Endpoint for WasmEndpoint {
 
     type ConnectionId = WasmConnectionId;
 
-    type ConnectInfo = String;
+    type ConnectDescription = String;
 
     type IncomingConnectionInfo<'i> = ();
 
@@ -33,7 +33,7 @@ impl Endpoint for WasmEndpoint {
 
     fn connect<'c>(
         &'c mut self,
-        info: Self::ConnectInfo,
+        info: Self::ConnectDescription,
     ) -> Option<(Self::ConnectionId, Self::Connection<'c>)> {
         todo!()
     }

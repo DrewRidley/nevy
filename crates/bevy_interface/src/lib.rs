@@ -1,15 +1,20 @@
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*, utils::intern::Interned};
 
 pub mod connections;
+pub mod description;
 pub mod endpoint;
 
 pub mod prelude {
-    pub use crate::connections::{BevyStreamEvent, BevyStreamId, Description, MismatchedType};
-    pub use crate::endpoint::{
-        BevyConnection, BevyEndpoint, ConnectError, Connections, MismatchedEndpointType,
-    };
+    pub use crate::connections::{BevyStreamEvent, BevyStreamId};
+    pub use crate::description::{CloneableDescription, Description};
+    pub use crate::endpoint::{BevyConnection, BevyEndpoint, ConnectError, Connections};
     pub use crate::{Connected, Disconnected, EndpointPlugin};
     pub use transport_interface::StreamEventType;
+}
+
+#[derive(Debug)]
+pub struct MismatchedType {
+    pub expected: &'static str,
 }
 
 /// adds events and update loop for

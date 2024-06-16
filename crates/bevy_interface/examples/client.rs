@@ -103,11 +103,11 @@ fn connect(endpoint_q: Query<Entity, With<ExampleEndpoint>>, mut connections: Co
     let connection_entity = connections
         .connect::<QuinnEndpoint>(
             endpoint_entity,
-            (
+            Description::new_connect_description::<QuinnEndpoint>((
                 quinn_client_config,
                 "127.0.0.1:27018".parse().unwrap(),
                 "dev.drewridley.com".into(),
-            ),
+            )),
         )
         .unwrap()
         .unwrap();
@@ -134,7 +134,7 @@ fn send_message(
             let mut connection = endpoint.connection_mut(connection_entity).unwrap();
 
             let stream_id = connection
-                .open_stream(Description::new::<QuinnStreamId>(
+                .open_stream(Description::new_open_description::<QuinnStreamId>(
                     nevy_quic::quinn_proto::Dir::Uni,
                 ))
                 .unwrap()
@@ -172,6 +172,9 @@ fn send_stream_data(
 
         loop {
             if stream_queue.buffer.len() == 0 {
+                stream.close(Description::new_send_close_description::<QuinnStreamId>(
+                    None,
+                ));
                 commands.entity(stream_entity).despawn();
                 break;
             }

@@ -12,4 +12,5 @@ pub mod prelude {
     pub use crate::connection::*;
     pub use crate::endpoint::*;
     pub use crate::quinn_stream::*;
+    pub use quinn_proto::{Dir, VarInt};
 }

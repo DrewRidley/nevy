@@ -272,7 +272,7 @@ impl Endpoint for QuinnEndpoint {
 
     type ConnectionId = QuinnConnectionId;
 
-    type ConnectInfo = (
+    type ConnectDescription = (
         quinn_proto::ClientConfig,
         SocketAddr,
         std::borrow::Cow<'static, str>,
@@ -302,7 +302,7 @@ impl Endpoint for QuinnEndpoint {
     /// Connect to a peer, specified by [Self::ConnectInfo].
     fn connect<'c>(
         &'c mut self,
-        info: Self::ConnectInfo,
+        info: Self::ConnectDescription,
     ) -> Option<(Self::ConnectionId, Self::Connection<'c>)> {
         let (handle, connection) = self
             .endpoint
