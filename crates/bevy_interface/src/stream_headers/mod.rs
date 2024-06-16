@@ -1,6 +1,8 @@
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*, utils::intern::Interned};
 use transport_interface::StreamEventType;
 
+pub mod headers;
+
 use crate::{
     connections::{BevyConnectionMut, StreamError},
     prelude::{BevyStreamEvent, BevyStreamId, Connections, Description},
