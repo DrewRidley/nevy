@@ -7,7 +7,7 @@ use std::{
 
 use slotmap::new_key_type;
 use transport_interface::{ConnectionMut, ConnectionRef, StreamEvent};
-use web_transport_wasm::Session;
+use web_transport_wasm::{Session, WebError};
 
 use crate::stream::WasmStreamId;
 
@@ -33,7 +33,7 @@ enum WasmSession {
     /// The session is disconnected and awaiting a new connection attempt.
     Disconnected,
     /// The session is currently connecting with the specified future that must be polled to progress the connection.
-    Connecting(Box<dyn Future<Output = Session>>),
+    Connecting(Box<dyn Future<Output = Result<Session, WebError>>>),
     /// The session is currently connected.
     Connected(ConnectedWasmSession),
 }
@@ -47,7 +47,10 @@ pub struct WasmConnection {
 
 impl WasmConnection {
     pub(crate) fn new() -> Self {
-        WasmConnection {}
+        WasmConnection {
+            session: WasmSession::Disconnected,
+            stream_events: VecDeque::new(),
+        }
     }
 }
 
