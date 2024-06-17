@@ -12,12 +12,11 @@ pub struct MessageDeserializationPlugin<C> {
 }
 
 trait MessageIdBuilder<C>: Send + Sync + 'static {
-    fn build(&self, schedule: Interned<dyn ScheduleLabel>, message_id: u16, app: &mut App) -> u16;
+    fn build(&self, schedule: Interned<dyn ScheduleLabel>, message_id: u16, app: &mut App);
 }
 
 struct MessageIdBuilderType<T> {
     _p: PhantomData<T>,
-    header: u16,
 }
 
 impl<C> MessageDeserializationPlugin<C> {
@@ -32,14 +31,9 @@ impl<C> MessageDeserializationPlugin<C> {
 
 impl<C: Component> MessageDeserializationPlugin<C> {
     /// adds a message type to the plugin, assigning it the next message id
-    pub fn add_message<T: DeserializeOwned + Send + Sync + 'static>(
-        &mut self,
-        header: u16,
-    ) -> &mut Self {
-        self.messages.push(Box::new(MessageIdBuilderType::<T> {
-            _p: PhantomData,
-            header,
-        }));
+    pub fn add_message<T: DeserializeOwned + Send + Sync + 'static>(&mut self) -> &mut Self {
+        self.messages
+            .push(Box::new(MessageIdBuilderType::<T> { _p: PhantomData }));
 
         self
     }
