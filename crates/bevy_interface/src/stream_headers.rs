@@ -242,7 +242,7 @@ pub struct HeaderStreamId {
 #[derive(Debug)]
 pub enum InitializeHeaderStreamError {
     StreamClosedPrematurly,
-    MismatchedConnection { connection: MismatchedType },
+    MismatchedConnection(MismatchedType),
     FatalSendErr(Box<dyn StreamError>),
 }
 
@@ -275,9 +275,7 @@ impl HeaderStreamId {
         connection: &mut BevyConnectionMut,
     ) -> Result<Option<BevyStreamId>, InitializeHeaderStreamError> {
         let mut stream = match connection.send_stream(self.stream_id.clone()) {
-            Err(err) => {
-                return Err(InitializeHeaderStreamError::MismatchedConnection { connection: err })
-            }
+            Err(err) => return Err(InitializeHeaderStreamError::MismatchedConnection(err)),
             Ok(None) => return Err(InitializeHeaderStreamError::StreamClosedPrematurly),
             Ok(Some(stream)) => stream,
         };
@@ -304,5 +302,12 @@ impl HeaderStreamId {
                 }
             }
         }
+    }
+
+    /// cancels header writing if it hasn't been completed and returns the stream id
+    ///
+    /// typically would only be used for closing the stream
+    pub fn end(self) -> BevyStreamId {
+        self.stream_id
     }
 }

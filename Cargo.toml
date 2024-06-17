@@ -15,12 +15,6 @@ bevy_interface.path = "./crates/bevy_interface"
 
 [workspace]
 members = ["crates/*"]
-default-members = [
-    "crates/bevy_interface",
-    "crates/nevy_quic",
-    "crates/nevy_web_transport",
-    "crates/transport_interface",
-]
 resolver = "2"
 
 [workspace.dependencies]

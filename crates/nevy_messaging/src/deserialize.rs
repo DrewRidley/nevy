@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, marker::PhantomData};
 
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*, utils::intern::Interned};
-use bevy_interface::{connections::BevyRecvStream, prelude::*};
+use bevy_interface::prelude::*;
 use serde::de::DeserializeOwned;
 
 /// Adds message deserialization functionality
@@ -59,8 +59,11 @@ impl<C: Component> Plugin for MessageDeserializationPlugin<C> {
 impl<T: DeserializeOwned + Send + Sync + 'static, C: Component> MessageIdBuilder<C>
     for MessageIdBuilderType<T>
 {
-    fn build(&self, schedule: Interned<dyn ScheduleLabel>, message_id: u16, app: &mut App) -> u16 {
-        app.insert_resource(MessageId::<T, C>::new(message_id));
+    fn build(&self, schedule: Interned<dyn ScheduleLabel>, message_id: u16, app: &mut App) {
+        app.insert_resource(MessageId::<C, T> {
+            _p: PhantomData,
+            message_id,
+        });
 
         app.add_systems(
             schedule,
@@ -69,8 +72,6 @@ impl<T: DeserializeOwned + Send + Sync + 'static, C: Component> MessageIdBuilder
                 insert_connection_message_type_components::<C, T>,
             ),
         );
-
-        self.header
     }
 }
 
@@ -80,10 +81,10 @@ pub struct EndpointMessagingHeader {
     pub header: u16,
 }
 
-/// Contains the message id of some message type
+/// Contains the message id of a type
 #[derive(Resource)]
-struct MessageId<T, C> {
-    _p: PhantomData<(T, C)>,
+struct MessageId<C, T> {
+    _p: PhantomData<(C, T)>,
     message_id: u16,
 }
 
@@ -115,19 +116,6 @@ struct ReceivedSerializedMessages {
 #[derive(Component)]
 pub struct ReceivedMessages<T> {
     messages: VecDeque<T>,
-}
-
-impl<T, C> MessageId<T, C> {
-    fn new(message_id: u16) -> Self {
-        MessageId {
-            _p: PhantomData,
-            message_id,
-        }
-    }
-
-    fn get(&self) -> u16 {
-        self.message_id
-    }
 }
 
 impl ReadMessageState {
@@ -270,11 +258,11 @@ fn insert_connection_message_type_components<C: Component, T: Send + Sync + 'sta
 }
 
 fn deserialize_messages<C: Send + Sync + 'static, T: DeserializeOwned + Send + Sync + 'static>(
-    message_id: Res<MessageId<T, C>>,
+    message_id: Res<MessageId<C, T>>,
     mut connection_q: Query<(&mut ReceivedSerializedMessages, &mut ReceivedMessages<T>)>,
 ) {
     for (mut serialized_messages, mut deserialized_messages) in connection_q.iter_mut() {
-        while let Some(bytes) = serialized_messages.poll_message_received(message_id.get()) {
+        while let Some(bytes) = serialized_messages.poll_message_received(message_id.message_id) {
             let Ok(deserialized) = bincode::deserialize(bytes.as_ref()) else {
                 warn!(
                     "failed to deserialize a \"{}\" message",

@@ -6,14 +6,16 @@ pub mod endpoint;
 pub mod stream_headers;
 
 pub mod prelude {
-    pub use crate::connections::{BevyStreamEvent, BevyStreamId};
+    pub use crate::connections::{
+        BevyConnectionMut, BevyRecvStream, BevySendStream, BevyStreamEvent, BevyStreamId,
+    };
     pub use crate::description::{CloneableDescription, Description};
     pub use crate::endpoint::{BevyConnection, BevyEndpoint, ConnectError, Connections};
     pub use crate::stream_headers::{
         EndpointStreamHeaders, HeaderStreamEvent, HeaderStreamEventType, HeaderStreamId,
         StreamHeaderPlugin,
     };
-    pub use crate::{Connected, Disconnected, EndpointPlugin};
+    pub use crate::{Connected, Disconnected, EndpointPlugin, MismatchedType};
     pub use transport_interface::StreamEventType;
 }
 

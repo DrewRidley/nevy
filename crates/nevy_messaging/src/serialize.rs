@@ -1,6 +1,9 @@
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
+use bevy_interface::{
+    connections::StreamError, prelude::*, stream_headers::InitializeHeaderStreamError,
+};
 use serde::Serialize;
 
 /// Adds message serialization functionality
@@ -47,5 +50,158 @@ impl<C: Component> Plugin for MessageSerializationPlugin<C> {
 impl<T: Serialize + Send + Sync + 'static, C: Component> MessageIdBuilder<C>
     for MessageIdBuilderType<T>
 {
-    fn build(&self, message_id: u16, app: &mut App) {}
+    fn build(&self, message_id: u16, app: &mut App) {
+        app.insert_resource(MessageId::<C, T> {
+            _p: PhantomData,
+            message_id,
+        });
+    }
+}
+
+#[derive(Resource)]
+struct MessageId<C, T> {
+    _p: PhantomData<(C, T)>,
+    message_id: u16,
+}
+
+/// wraps a stream id and ensures that the message protocol isn't broken
+pub struct MessageStreamState<C> {
+    _p: PhantomData<C>,
+    stream_id: HeaderStreamId,
+    buffer: Vec<u8>,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct MessageStreamParams<'w, C: Send + Sync + 'static, T: Send + Sync + 'static> {
+    message_id: Res<'w, MessageId<T, C>>,
+}
+
+#[derive(Debug)]
+pub enum MessageStreamSendError {
+    StreamClosed,
+    MismatchedConnection(MismatchedType),
+    FatalSendErr(Box<dyn StreamError>),
+}
+
+impl<C: Send + Sync + 'static> MessageStreamState<C> {
+    /// creates a new stream on a connection and sets up state for sending messages on that stream
+    ///
+    /// the same connection should be used for all further operations
+    pub fn new(
+        connection: &mut BevyConnectionMut,
+        description: Description,
+        header: u16,
+    ) -> Result<Option<Self>, MismatchedType> {
+        let Some(stream_id) = HeaderStreamId::new(connection, description, header)? else {
+            return Ok(None);
+        };
+
+        Ok(Some(MessageStreamState {
+            _p: PhantomData,
+            stream_id,
+            buffer: Vec::new(),
+        }))
+    }
+
+    /// writes as much of the internal buffer as possible
+    ///
+    /// returns `true` if all data was successfully writen and another message will be accepted
+    pub fn flush(
+        &mut self,
+        connection: &mut BevyConnectionMut,
+    ) -> Result<bool, MessageStreamSendError> {
+        // get the stream id
+        let Some(stream_id) = self
+            .stream_id
+            .poll_ready(connection)
+            .map_err(|err| match err {
+                InitializeHeaderStreamError::StreamClosedPrematurly => {
+                    MessageStreamSendError::StreamClosed
+                }
+                InitializeHeaderStreamError::MismatchedConnection(err) => {
+                    MessageStreamSendError::MismatchedConnection(err)
+                }
+                InitializeHeaderStreamError::FatalSendErr(err) => {
+                    MessageStreamSendError::FatalSendErr(err)
+                }
+            })?
+        else {
+            // header hasn't been sent yet
+            return Ok(false);
+        };
+
+        // header has been written, get the stream
+        let Some(mut stream) = connection
+            .send_stream(stream_id)
+            .map_err(|err| MessageStreamSendError::MismatchedConnection(err))?
+        else {
+            return Err(MessageStreamSendError::StreamClosed);
+        };
+
+        // write as much data as possible
+        loop {
+            if self.buffer.is_empty() {
+                break Ok(true);
+            }
+
+            match stream.send(&self.buffer) {
+                Err(err) => {
+                    if err.is_fatal() {
+                        return Err(MessageStreamSendError::FatalSendErr(err));
+                    }
+
+                    // writing is blocked
+                    break Ok(false);
+                }
+                Ok(bytes) => {
+                    self.buffer.drain(..bytes);
+                }
+            }
+        }
+    }
+
+    /// returns `true` if a new message will be accepted
+    pub fn ready(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
+    /// attempts to send a message
+    ///
+    /// will return `true` if the message was accepted,
+    /// but it may not have been written completely.
+    /// use [ready](MessageStreamState::ready) to check if
+    /// another message will be accepted
+    pub fn send<T: Serialize + Send + Sync + 'static>(
+        &mut self,
+        connection: &mut BevyConnectionMut,
+        params: MessageStreamParams<C, T>,
+        message: &T,
+    ) -> Result<bool, MessageStreamSendError> {
+        if !self.ready() {
+            if !self.flush(connection)? {
+                return Ok(false);
+            }
+        }
+
+        let message_id = params.message_id.message_id.to_be_bytes();
+        let bytes = bincode::serialize(message).expect("Failed to serialize message");
+        let message_length = (bytes.len() as u16).to_be_bytes();
+
+        self.buffer.extend(message_id);
+        self.buffer.extend(message_length);
+        self.buffer.extend(bytes);
+
+        self.flush(connection)?;
+
+        Ok(true)
+    }
+
+    /// cancels message writing and returns the stream id
+    ///
+    /// cancels message header writing if it hasn't been completed
+    ///
+    /// typically would only be used for closing the stream
+    pub fn end(self) -> BevyStreamId {
+        self.stream_id.end()
+    }
 }
