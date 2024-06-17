@@ -10,6 +10,9 @@ pub(crate) trait BevyStreamIdInner: Send + Sync + 'static {
     fn clone_inner(&self) -> Box<dyn BevyStreamIdInner>;
 }
 
+/// a type erased stream id valid for a particular endpoint
+///
+/// implements clone but not copy due to the heap allocation needed for dynamic dispatch
 pub struct BevyStreamId {
     inner: Box<dyn BevyStreamIdInner>,
 }

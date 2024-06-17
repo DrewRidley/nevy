@@ -10,7 +10,6 @@ pub mod prelude {
     pub use crate::description::{CloneableDescription, Description};
     pub use crate::endpoint::{BevyConnection, BevyEndpoint, ConnectError, Connections};
     pub use crate::stream_headers::{
-        headers::{HeaderId, HeaderPlugin},
         EndpointStreamHeaders, HeaderStreamEvent, HeaderStreamEventType, HeaderStreamId,
         StreamHeaderPlugin,
     };
