@@ -1,3 +1,5 @@
+pub use transport_interface;
+
 pub use bevy_interface as bevy;
 
 pub use nevy_messaging as messaging;
@@ -9,6 +11,8 @@ pub use nevy_quic as quic;
 pub use nevy_web_transport as web_transport;
 
 pub mod prelude {
+    pub use transport_interface::*;
+
     pub use bevy_interface::prelude::*;
 
     pub use nevy_messaging::prelude::*;

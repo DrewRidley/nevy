@@ -917,6 +917,7 @@ dependencies = [
  "nevy_messaging",
  "nevy_quic",
  "nevy_web_transport",
+ "transport_interface",
 ]
 
 [[package]]

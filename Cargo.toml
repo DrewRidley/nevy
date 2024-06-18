@@ -15,10 +15,11 @@ repository = "https://github.com/DrewRidley/nevy"
 documentation = "https://docs.rs/nevy"
 
 [features]
-quic = [ "nevy_quic" ]
-web_transport = [ "nevy_web_transport" ]
+quic = ["nevy_quic"]
+web_transport = ["nevy_web_transport"]
 
 [dependencies]
+transport_interface.path = "./crates/transport_interface"
 bevy_interface.path = "./crates/bevy_interface"
 nevy_messaging.path = "./crates/nevy_messaging"
 nevy_quic = { path = "./crates/nevy_quic", optional = true }
