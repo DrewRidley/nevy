@@ -8,9 +8,6 @@ use serialize::MessageSerializationPlugin;
 pub mod deserialize;
 pub mod serialize;
 
-// re export same serde version
-pub use serde;
-
 pub mod prelude {
     pub use crate::serialize::{
         MessageSerializationPlugin, MessageStreamParams, MessageStreamState,
@@ -21,8 +18,6 @@ pub mod prelude {
     };
 
     pub use crate::ProtocolBuilder;
-
-    pub use serde::{Deserialize, Serialize};
 }
 
 pub struct ProtocolBuilder<C> {
