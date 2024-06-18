@@ -15,7 +15,7 @@ pub mod prelude {
         EndpointStreamHeaders, HeaderStreamEvent, HeaderStreamEventType, HeaderStreamId,
         StreamHeaderPlugin,
     };
-    pub use crate::{Connected, Disconnected, EndpointPlugin, MismatchedType};
+    pub use crate::{Connected, Disconnected, EndpointPlugin, MismatchedType, UpdateEndpoints};
     pub use transport_interface::StreamEventType;
 }
 
