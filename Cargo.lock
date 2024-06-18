@@ -777,6 +777,9 @@ name = "nevy"
 version = "0.1.0-dev"
 dependencies = [
  "bevy_interface",
+ "nevy_messaging",
+ "nevy_quic",
+ "nevy_web_transport",
 ]
 
 [[package]]
