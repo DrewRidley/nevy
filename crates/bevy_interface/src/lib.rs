@@ -24,6 +24,10 @@ pub struct MismatchedType {
     pub expected: &'static str,
 }
 
+/// system set where endpoints are updated
+#[derive(Clone, PartialEq, Eq, Debug, std::hash::Hash, SystemSet)]
+pub struct UpdateEndpoints;
+
 /// adds events and update loop for
 /// [BevyEndpoint] and [BevyConnection]
 pub struct EndpointPlugin {
@@ -50,7 +54,10 @@ impl Plugin for EndpointPlugin {
         app.add_event::<Connected>();
         app.add_event::<Disconnected>();
 
-        app.add_systems(self.schedule, endpoint::update_endpoints);
+        app.add_systems(
+            self.schedule,
+            endpoint::update_endpoints.in_set(UpdateEndpoints),
+        );
     }
 }
 
