@@ -22,7 +22,7 @@ pub struct StreamHeaderPlugin {
 
 impl StreamHeaderPlugin {
     /// creates a new [StreamHeaderPlugin] that updates in a certain schedule
-    fn new(schedule: impl ScheduleLabel) -> Self {
+    pub fn new(schedule: impl ScheduleLabel) -> Self {
         StreamHeaderPlugin {
             schedule: schedule.intern(),
         }
