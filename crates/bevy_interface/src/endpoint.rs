@@ -266,14 +266,11 @@ pub enum ConnectError {
 }
 
 impl<'w, 's> Connections<'w, 's> {
-    pub fn connect<E: Endpoint>(
+    pub fn connect(
         &mut self,
         endpoint_entity: Entity,
         connect_info: Description,
-    ) -> Result<Option<Entity>, ConnectError>
-    where
-        E::ConnectDescription: 'static,
-    {
+    ) -> Result<Option<Entity>, ConnectError> {
         let Ok(mut endpoint) = self.endpoint_q.get_mut(endpoint_entity) else {
             return Err(ConnectError::InvalidEntity);
         };
