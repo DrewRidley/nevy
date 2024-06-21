@@ -1,4 +1,4 @@
-use std::{io::Read, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use bevy::prelude::*;
 use bevy_interface::prelude::*;
@@ -57,7 +57,7 @@ fn connect(endpoint_q: Query<Entity, With<ExampleEndpoint>>, mut connections: Co
     quinn_client_config.transport_config(Arc::new(transport_config));
 
     let connection_entity = connections
-        .connect::<QuinnEndpoint>(
+        .connect(
             endpoint_entity,
             Description::new_connect_description::<QuinnEndpoint>((
                 quinn_client_config,
