@@ -174,7 +174,7 @@ impl<C: Send + Sync + 'static> MessageStreamState<C> {
     pub fn send<T: Serialize + Send + Sync + 'static>(
         &mut self,
         connection: &mut BevyConnectionMut,
-        params: MessageStreamParams<C, T>,
+        params: &MessageStreamParams<C, T>,
         message: &T,
     ) -> Result<bool, MessageStreamSendError> {
         if !self.ready() {
