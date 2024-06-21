@@ -41,9 +41,12 @@ impl<C: Component> ProtocolBuilder<C> {
         }
     }
 
-    pub fn add_message<T: Serialize + DeserializeOwned + Send + Sync + 'static>(&mut self) {
+    pub fn add_message<T: Serialize + DeserializeOwned + Send + Sync + 'static>(
+        &mut self,
+    ) -> &mut Self {
         self.messages
             .push(Box::new(MessageAdderType::<T> { _p: PhantomData }));
+        self
     }
 
     pub fn build_serialization(&self) -> MessageSerializationPlugin<C> {
