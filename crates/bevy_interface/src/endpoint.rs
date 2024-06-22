@@ -251,6 +251,8 @@ where
 
     fn disconnected(&mut self, connection_id: <E as Endpoint>::ConnectionId) {
         if let Some(connection_entity) = self.connections.remove_connection(connection_id) {
+            self.params.commands.entity(connection_entity).despawn_recursive();
+
             self.params.disconnected_w.send(Disconnected {
                 endpoint_entity: self.endpoint_entity,
                 connection_entity,

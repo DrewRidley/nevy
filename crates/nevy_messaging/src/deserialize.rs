@@ -293,21 +293,31 @@ fn receive_message_streams<C: Component>(
             continue;
         };
 
+        debug!("new stream");
+
         let Ok(&EndpointMessagingHeader { header }) = endpoint_q.get(*endpoint_entity) else {
             continue;
         };
+
+        debug!("on the correct endpoint");
 
         if incoming_header != header {
             continue;
         }
 
+        debug!("with the correct header");
+
         let Ok(mut streams) = connection_q.get_mut(*connection_entity) else {
             continue;
         };
 
+        debug!("could query the connection");
+
         streams
             .streams
             .push((stream_id.clone(), ReadMessageState::new()));
+
+        debug!("success");
     }
 }
 

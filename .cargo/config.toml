@@ -4,6 +4,6 @@ rustflags = [
     "-C",
     "link-arg=-fuse-ld=mold",
     "--cfg=web_sys_unstable_apis",
-    "-Z",
-    "threads=8",
+    # "-Z",
+    # "threads=8",
 ]
