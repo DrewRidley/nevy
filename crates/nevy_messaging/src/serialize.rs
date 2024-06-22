@@ -150,10 +150,12 @@ impl<C: Send + Sync + 'static> MessageStreamState<C> {
                         return Err(MessageStreamSendError::FatalSendErr(err));
                     }
 
+                    trace!("Writing blocked");
                     // writing is blocked
                     break Ok(false);
                 }
                 Ok(bytes) => {
+                    debug!("Wrote {} bytes", bytes);
                     self.buffer.drain(..bytes);
                 }
             }
@@ -187,6 +189,7 @@ impl<C: Send + Sync + 'static> MessageStreamState<C> {
         let bytes = bincode::serialize(message).expect("Failed to serialize message");
         let message_length = (bytes.len() as u16).to_be_bytes();
 
+        debug!("writing message to buffer");
         self.buffer.extend(message_id);
         self.buffer.extend(message_length);
         self.buffer.extend(bytes);
