@@ -73,7 +73,7 @@ pub struct MessageStreamState<C> {
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct MessageStreamParams<'w, C: Send + Sync + 'static, T: Send + Sync + 'static> {
-    message_id: Res<'w, MessageId<T, C>>,
+    message_id: Res<'w, MessageId<C, T>>,
 }
 
 #[derive(Debug)]
