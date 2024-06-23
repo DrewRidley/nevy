@@ -3,21 +3,9 @@ name = "nevy_wasm"
 version = "0.1.0"
 edition = "2021"
 
-
 [dependencies]
-transport_interface.path = "../transport_interface"
-slotmap = "1.0.7"
-futures-lite = "2.3.0"
-wasm-bindgen = "0.2"
-
-wasm-bindgen-futures = "0.4"
-js-sys = "0.3.69"
-bytes = "1"
-
-
-[dependencies.web-sys]
-version = "0.3.69"
-features = [
+transport_interface = { path = "../transport_interface" }
+web-sys = { version = "0.3", features = [
     "ReadableStream",
     "ReadableStreamDefaultReader",
     "ReadableStreamReadResult",
@@ -29,4 +17,12 @@ features = [
     "WebTransportDatagramDuplexStream",
     "WritableStream",
     "WritableStreamDefaultWriter",
-]
+] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3.69"
+futures-lite = "1.12"
+bytes = "1.6.0"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
