@@ -1,14 +1,21 @@
-use std::cmp;
-
-use super::reader::Reader;
 use crate::error::WebError;
 use bytes::{BufMut, Bytes, BytesMut};
-use js_sys::Uint8Array;
-use web_sys::WebTransportReceiveStream;
+use js_sys::{Reflect, Uint8Array};
+use std::cmp;
+use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{
+    ReadableStream, ReadableStreamDefaultReader, ReadableStreamReadResult,
+    WebTransportReceiveStream,
+};
 
 pub struct RecvStream {
     reader: Reader,
     buffer: BytesMut,
+}
+
+struct Reader {
+    inner: ReadableStreamDefaultReader,
 }
 
 impl RecvStream {
@@ -51,13 +58,11 @@ impl RecvStream {
         }
 
         let mut data: Bytes = match self.reader.read::<Uint8Array>().await? {
-            // TODO can we avoid making a copy here?
             Some(data) => data.to_vec().into(),
             None => return Ok(None),
         };
 
         if data.len() > max {
-            // The chunk is too big; add the tail to the buffer for next read.
             self.buffer.extend_from_slice(&data.split_off(max));
         }
 
@@ -66,5 +71,35 @@ impl RecvStream {
 
     pub fn stop(self, reason: &str) {
         self.reader.close(reason);
+    }
+}
+
+impl Reader {
+    fn new(stream: &ReadableStream) -> Result<Self, WebError> {
+        let inner = stream.get_reader().unchecked_into();
+        Ok(Self { inner })
+    }
+
+    async fn read<T: JsCast>(&mut self) -> Result<Option<T>, WebError> {
+        let result: ReadableStreamReadResult = JsFuture::from(self.inner.read()).await?.into();
+
+        if Reflect::get(&result, &"done".into())?.is_truthy() {
+            return Ok(None);
+        }
+
+        let res = Reflect::get(&result, &"value".into())?.dyn_into()?;
+        Ok(Some(res))
+    }
+
+    fn close(self, reason: &str) {
+        let str = JsValue::from_str(reason);
+        let _ = self.inner.cancel_with_reason(&str);
+    }
+}
+
+impl Drop for Reader {
+    fn drop(&mut self) {
+        let _ = self.inner.cancel();
+        self.inner.release_lock();
     }
 }

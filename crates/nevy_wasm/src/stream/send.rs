@@ -1,13 +1,18 @@
 use bytes::{Buf, Bytes};
 use js_sys::{Reflect, Uint8Array};
-use web_sys::WebTransportSendStream;
+use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{WebTransportSendStream, WritableStream, WritableStreamDefaultWriter};
 
 use crate::error::WebError;
-use crate::stream::writer::Writer;
 
 pub struct SendStream {
     stream: WebTransportSendStream,
     writer: Writer,
+}
+
+struct Writer {
+    inner: WritableStreamDefaultWriter,
 }
 
 impl SendStream {
@@ -38,5 +43,29 @@ impl SendStream {
     pub fn set_priority(&mut self, order: i32) {
         Reflect::set(&self.stream, &"sendOrder".into(), &order.into())
             .expect("failed to set priority");
+    }
+}
+
+impl Writer {
+    fn new(stream: &WritableStream) -> Result<Self, WebError> {
+        let inner = stream.get_writer()?.unchecked_into();
+        Ok(Self { inner })
+    }
+
+    async fn write(&mut self, v: &JsValue) -> Result<(), WebError> {
+        JsFuture::from(self.inner.write_with_chunk(v)).await?;
+        Ok(())
+    }
+
+    fn close(self, reason: &str) {
+        let str = JsValue::from_str(reason);
+        let _ = self.inner.abort_with_reason(&str);
+    }
+}
+
+impl Drop for Writer {
+    fn drop(&mut self) {
+        let _ = self.inner.close();
+        self.inner.release_lock();
     }
 }

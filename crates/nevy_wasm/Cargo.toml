@@ -23,6 +23,8 @@ wasm-bindgen-futures = "0.4"
 js-sys = "0.3.69"
 futures-lite = "1.12"
 bytes = "1.6.0"
+slotmap = "1.0.7"
+log = "0.4.21"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
