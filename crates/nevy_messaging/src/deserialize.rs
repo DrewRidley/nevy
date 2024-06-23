@@ -211,8 +211,14 @@ impl<T> ReceivedMessages<T> {
         }
     }
 
+    /// drains the internal queue
     pub fn drain(&mut self) -> impl Iterator<Item = T> + '_ {
         self.messages.drain(..)
+    }
+
+    /// pops one message of the front of the queue
+    pub fn pop(&mut self) -> Option<T> {
+        self.messages.pop_front()
     }
 }
 
