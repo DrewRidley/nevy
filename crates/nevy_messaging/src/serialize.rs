@@ -60,7 +60,7 @@ impl<T: Serialize + Send + Sync + 'static, C: Component> MessageIdBuilder<C>
 
 /// the message id for a message `T`,
 /// assigned by [MessageSerializationPlugin] and stored as a resource
-#[derive(Copy, Resource)]
+#[derive(Resource)]
 pub struct MessageId<C, T> {
     _p: PhantomData<(C, T)>,
     message_id: u16,
@@ -74,6 +74,8 @@ impl<C, T> Clone for MessageId<C, T> {
         }
     }
 }
+
+impl<C, T> Copy for MessageId<C, T> {}
 
 /// wraps a stream id and ensures that the message protocol isn't broken
 pub struct MessageStreamState<C> {
