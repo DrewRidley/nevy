@@ -24,6 +24,7 @@ bevy_interface.path = "./crates/bevy_interface"
 nevy_messaging.path = "./crates/nevy_messaging"
 nevy_quic = { path = "./crates/nevy_quic", optional = true }
 nevy_web_transport = { path = "./crates/nevy_web_transport", optional = true }
+log = "0.4.21"
 
 [workspace.dependencies]
 bevy = { version = "0.13", default-features = false }

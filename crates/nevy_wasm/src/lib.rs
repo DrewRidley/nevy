@@ -1,4 +1,4 @@
 mod connection;
 mod endpoint;
-mod reader;
+mod error;
 mod stream;
