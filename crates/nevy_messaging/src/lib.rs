@@ -9,9 +9,7 @@ pub mod deserialize;
 pub mod serialize;
 
 pub mod prelude {
-    pub use crate::serialize::{
-        MessageSerializationPlugin, MessageStreamParams, MessageStreamState,
-    };
+    pub use crate::serialize::{MessageId, MessageSerializationPlugin, MessageStreamState};
 
     pub use crate::deserialize::{
         EndpointMessagingHeader, MessageDeserializationPlugin, ReceivedMessages,

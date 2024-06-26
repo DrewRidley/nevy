@@ -58,8 +58,10 @@ impl<T: Serialize + Send + Sync + 'static, C: Component> MessageIdBuilder<C>
     }
 }
 
-#[derive(Resource)]
-struct MessageId<C, T> {
+/// the message id for a message `T`,
+/// assigned by [MessageSerializationPlugin] and stored as a resource
+#[derive(Clone, Copy, Resource)]
+pub struct MessageId<C, T> {
     _p: PhantomData<(C, T)>,
     message_id: u16,
 }
@@ -69,11 +71,6 @@ pub struct MessageStreamState<C> {
     _p: PhantomData<C>,
     stream_id: HeaderStreamId,
     buffer: Vec<u8>,
-}
-
-#[derive(bevy::ecs::system::SystemParam)]
-pub struct MessageStreamParams<'w, C: Send + Sync + 'static, T: Send + Sync + 'static> {
-    message_id: Res<'w, MessageId<T, C>>,
 }
 
 #[derive(Debug)]
@@ -174,7 +171,7 @@ impl<C: Send + Sync + 'static> MessageStreamState<C> {
     pub fn send<T: Serialize + Send + Sync + 'static>(
         &mut self,
         connection: &mut BevyConnectionMut,
-        params: &MessageStreamParams<C, T>,
+        message_id: MessageId<C, T>,
         message: &T,
     ) -> Result<bool, MessageStreamSendError> {
         if !self.ready() {
@@ -183,7 +180,7 @@ impl<C: Send + Sync + 'static> MessageStreamState<C> {
             }
         }
 
-        let message_id = params.message_id.message_id.to_be_bytes();
+        let message_id = message_id.message_id.to_be_bytes();
         let bytes = bincode::serialize(message).expect("Failed to serialize message");
         let message_length = (bytes.len() as u16).to_be_bytes();
 
