@@ -1,6 +1,9 @@
 use std::{collections::VecDeque, marker::PhantomData};
 
-use bevy::{ecs::schedule::ScheduleLabel, prelude::*, utils::intern::Interned};
+use bevy::{
+    ecs::{intern::Interned, schedule::ScheduleLabel},
+    prelude::*,
+};
 use bevy_interface::prelude::*;
 use serde::de::DeserializeOwned;
 
