@@ -27,4 +27,4 @@ nevy_web_transport = { path = "./crates/nevy_web_transport", optional = true }
 log = "0.4.21"
 
 [workspace.dependencies]
-bevy = { version = "0.13", default-features = false }
+bevy = { version = "0.14", default-features = false }

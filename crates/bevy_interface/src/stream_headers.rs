@@ -1,4 +1,7 @@
-use bevy::{ecs::schedule::ScheduleLabel, prelude::*, utils::intern::Interned};
+use bevy::{
+    ecs::{intern::Interned, schedule::ScheduleLabel},
+    prelude::*,
+};
 use transport_interface::StreamEventType;
 
 use crate::{

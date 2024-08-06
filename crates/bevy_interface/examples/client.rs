@@ -19,7 +19,7 @@ fn main() {
     app.add_systems(Startup, (spawn_endpoint, apply_deferred, connect).chain());
     app.add_systems(Update, (log_events, send_message, send_stream_data));
 
-    app.run()
+    app.run();
 }
 
 #[derive(Component)]

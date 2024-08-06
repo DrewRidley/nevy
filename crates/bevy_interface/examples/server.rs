@@ -19,7 +19,7 @@ fn main() {
     app.add_systems(Startup, spawn_endpoint);
     app.add_systems(Update, (log_events, spawn_streams, receive_data));
 
-    app.run()
+    app.run();
 }
 
 #[derive(Component)]
