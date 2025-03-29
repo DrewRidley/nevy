@@ -80,6 +80,7 @@ impl Endpoint for WebTransportEndpoint {
         }
 
         for connection_id in quinn_handler.disconnections {
+            handler.disconnected(connection_id);
             self.connections.remove(&connection_id);
         }
 
